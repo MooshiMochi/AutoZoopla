@@ -62,6 +62,9 @@ class BrowserSession:
             self.login_gate = ContextLoginGuard(
                 self.provider, context, save_session_callback=self._save_session_state
             )
+
+            # monkey patch the context to include the login_gate for access in other parts of the code
+            setattr(context, "login_gate", self.login_gate)
             self.login_gate.start()
 
             try:

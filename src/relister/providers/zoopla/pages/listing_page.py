@@ -93,6 +93,12 @@ class ZooplaListingPage:
             wait_until="domcontentloaded",
         )
 
+        logger.debug("Waiting for login guard to complete...")
+
+        if (login_gate := getattr(self.page.context, "login_gate", None)) is not None:
+            await login_gate.wait_until_ready(self.page)
+            logger.debug("Login guard completed. Proceeding with scraping.")
+
         # Address:
         postcode = await self.try_wait_for_locator(
             selectors.LISTING_ADDR_POSTCODE, extract_attribute="value"

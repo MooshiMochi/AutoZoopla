@@ -8,12 +8,8 @@ from playwright.async_api import (
     BrowserContext,
     Frame,
     Page,
-    TimeoutError as PWTimeoutError,
-    Error as PlaywrightError,
 )
 from playwright._impl._errors import TargetClosedError
-
-from pytest_playwright.pytest_playwright import page
 
 from relister.providers.base import PropertyProvider
 
@@ -40,8 +36,9 @@ class ContextLoginGuard:
 
         # Prevent multiple navigation events from starting login concurrently.
         self._login_lock = asyncio.Lock()
+        self._login_task: asyncio.Task[None] | None = None
+
         self._started = False
-        self._return_urls: WeakKeyDictionary[Page, str] = WeakKeyDictionary()
         self._cookie_prompt_tasks: WeakKeyDictionary[Page, asyncio.Task[None]] = (
             WeakKeyDictionary()
         )
@@ -94,12 +91,19 @@ class ContextLoginGuard:
         self._start_cookie_watcher(page)
 
         if not self.provider.is_login_url(frame.url):
-            self._return_urls[page] = frame.url
+            return
+        else:
+            self._start_login_task(page)
+
+    def _start_login_task(self, page: Page) -> None:
+        if self._login_task and not self._login_task.done():
             return
 
-        await self._ensure_logged_in(page)
+        self._login_task = asyncio.create_task(
+            self._handle_login(page), name="ContextLoginGuard._handle_login"
+        )
 
-    async def _ensure_logged_in(self, page: Page) -> None:
+    async def _handle_login(self, page: Page) -> None:
         # Redirect chains may produce several navigation events.
         if self._login_lock.locked():
             return
@@ -109,34 +113,27 @@ class ContextLoginGuard:
             if not self.provider.is_login_url(page.url):
                 return
 
-            return_url = self._return_urls.get(page)
+            await self.provider.login(page)
+            if self.save_session_callback:
+                await self.save_session_callback(self.ctx)
+                logger.debug("Saved session state after login.")
 
-            await self._perform_login(page)
+    async def wait_until_ready(self, page: Page) -> None:
+        """Wait for the current authentication flow to complete
 
-            await self._restore_previous_page(page, return_url)
-            self._return_urls.pop(page, None)
+        Args:
+            page (Page): The Playwright page to wait for.
+        """
+        if self.provider.is_login_url(page.url):
+            self._start_login_task(page)
 
-    async def _perform_login(self, page: Page) -> None:
-        logger.debug(f"Login detected on: {page.url}")
+        while True:
+            task = self._login_task
 
-        await self.provider.login(page)
+            if task is None:
+                return
 
-        if self.save_session_callback:
-            await self.save_session_callback(self.ctx)
-            logger.debug("Saved session state after login.")
+            await asyncio.shield(task)
 
-    async def _restore_previous_page(self, page: Page, return_url: str | None) -> None:
-        try:
-            history_length = await page.evaluate("() => window.history.length")
-        except Exception:
-            history_length = 0
-
-        if history_length and history_length > 1:
-            await page.go_back()
-            await page.wait_for_load_state("networkidle")
-            logger.debug("Returned to previous page after login.")
-            return
-
-        if return_url and not self.provider.is_login_url(return_url):
-            await page.goto(return_url)
-            await page.wait_for_load_state("networkidle")
+            if task is self._login_task:
+                return

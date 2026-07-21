@@ -33,11 +33,29 @@ class ZooplaLoginPage:
 
         await self._handle_auth_code_prompt_if_needed()
 
+        await self._handle_branch_selection_if_needed()
+
         await self.page.wait_for_url("**/pro.zoopla.co.uk/**")
 
         await self.provider.detect_and_close_cookie_prompt(self.page)
 
         logger.info("Login completed")
+
+    async def _handle_branch_selection_if_needed(self) -> None:
+        # Check if the branch selection prompt is present
+        try:
+            await self.page.locator(selectors.BRANCH_SELECTOR).select_option(
+                value=selectors.BRANCH_ID, timeout=2_000  # 2 seconds
+            )
+        except PWTimeoutError:
+            logger.debug("No branch selection prompt detected.")
+            return
+
+        # Select the first branch and continue
+        await self.page.get_by_role(
+            "button",
+            name="Confirm",
+        ).click()
 
     async def _handle_auth_code_prompt_if_needed(self) -> None:
         # Check if the auth code prompt is present

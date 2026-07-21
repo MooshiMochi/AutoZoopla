@@ -5,11 +5,11 @@ DASHBOARD_URL = "https://pro.zoopla.co.uk/portal/dashboard?viewId=195132"
 CREATE_LISTING_URL = "https://pro.zoopla.co.uk/properties/listing/?category=residential&listing_type=rent&return_url=%2Fproperties%2Fbrowse%2F%3Flisting_type%3Drent"
 # CREATE_LISTING_URL = "file:///C:/Users/rchir/Downloads/ZooplaProCreateListing.html"
 AGENT_LISTING_URL_FMT = "https://pro.zoopla.co.uk/properties/listing/{_id}"
+CHANGE_BRANCH_URL = "https://pro.zoopla.co.uk/change-branch"
 
 
-LISTING_TITLE = "h1[data-testid='listing-title']"
-LISTING_DESCRIPTION = "[data-testid='listing-description']"
-LISTING_PRICE = "[data-testid='listing-price']"
+BRANCH_SELECTOR = "select#branch_id"
+BRANCH_ID = "56042"
 
 
 # Scraping selectors:
