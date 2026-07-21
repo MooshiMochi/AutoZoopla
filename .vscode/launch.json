@@ -1,0 +1,22 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Python: Current File",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${file}",
+			"console": "integratedTerminal",
+		},
+
+		{
+			"name": "Python: Relister app",
+			"type": "debugpy",
+			"request": "launch",
+			"program": "${workspaceFolder}/src/relister/cli.py",
+			"args": [
+				"relist", "--source", "zoopla", "--destination", "zoopla", "--url", "https://pro.zoopla.co.uk/properties/listing/5324554"],
+			"console": "integratedTerminal"
+		}
+	]
+}

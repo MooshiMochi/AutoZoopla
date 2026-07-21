@@ -1,0 +1,275 @@
+from datetime import datetime
+import logging
+from typing import Any
+
+from playwright.async_api import Page, TimeoutError as PWTimeoutError
+
+from relister.domain.models import Address, PropertyListing
+from relister.providers.zoopla import selectors
+from relister.providers.zoopla.mapper import parse_rent
+from pydantic import HttpUrl
+
+logger = logging.getLogger(__name__)
+
+
+class ZooplaListingPage:
+    def __init__(self, page: Page) -> None:
+        self.page = page
+
+    async def delete(self, listing_url: str | HttpUrl, submit=True) -> bool:
+        await self.page.goto(
+            str(listing_url),
+            wait_until="domcontentloaded",
+        )
+
+        try:
+            await self.page.locator("select#status").select_option(
+                "deleted", timeout=2_000
+            )
+        except PWTimeoutError:
+            logger.warning(
+                "Could not find the status dropdown. The listing may already be deleted."
+            )
+            return True
+
+        if not submit:  # dry run
+            logger.info(
+                "Dry run complete. The listing has been marked for deletion but not submitted."
+            )
+            return True
+        else:
+            await self.page.get_by_role(
+                "button",
+                name="save",
+            ).first.click()
+
+            success_indicator = self.page.locator("div.alert-success:has(strong)")
+            logger.info("Waiting for success indicator to appear...")
+            try:
+                await success_indicator.wait_for(
+                    state="visible",
+                    timeout=10_000,
+                )
+                return True
+            except PWTimeoutError:
+                logger.warning("Success indicator did not appear within the timeout.")
+                return False
+
+    async def try_wait_for_locator(
+        self,
+        locator: str,
+        *,
+        extract_attribute: str | None = None,
+        extract_text: bool = False,
+        timeout: int = 2_000,
+    ) -> Any:
+        """_summary_
+
+        Args:
+            locator (str): the locator to find
+            extract_attribute (str | None, optional): the attribute to extract. Defaults to None.
+            extract_text (bool, optional): whether to extract text. Defaults to False.
+            timeout (int, optional): the timeout in milliseconds. Defaults to 2_000.
+
+        Returns:
+            Any: the extracted value or None
+        """
+        try:
+            element = self.page.locator(locator)
+            if extract_attribute:
+                return await element.get_attribute(extract_attribute, timeout=timeout)
+            if extract_text:
+                text = await element.text_content(timeout=timeout)
+                # if not text:
+                #     return await element.text_content(timeout=timeout)
+                return text
+            return element
+        except PWTimeoutError:
+            return None
+
+    async def scrape(self, listing_url: str) -> PropertyListing:
+        await self.page.goto(
+            listing_url,
+            wait_until="domcontentloaded",
+        )
+
+        # Address:
+        postcode = await self.try_wait_for_locator(
+            selectors.LISTING_ADDR_POSTCODE, extract_attribute="value"
+        )
+        property_number = await self.try_wait_for_locator(
+            selectors.LISTING_ADDR_PROPERTY_NUMBER, extract_attribute="value"
+        )
+        street_name = await self.try_wait_for_locator(
+            selectors.LISTING_ADDR_STREET_NAME, extract_attribute="value"
+        )
+        town = await self.try_wait_for_locator(
+            selectors.LISTING_ADDR_TOWN, extract_attribute="value"
+        )
+
+        address = Address(
+            house_number=property_number,
+            street_name=str(street_name),
+            town=str(town),
+            postcode=str(postcode),
+        )
+
+        # Property Details:
+        property_type = await self.try_wait_for_locator(
+            selectors.LISTING_PROPERTY_TYPE, extract_text=True
+        )
+        property_type_checkboxes = [
+            await self.page.locator(selector).is_checked()
+            for selector in selectors.LISTING_PROPERTY_CHECKBOXES
+        ]
+
+        try:
+            council_tax_band = await self.try_wait_for_locator(
+                selectors.LISTING_PROPERTY_COUNCIL_TAX_BAND, extract_text=True
+            )
+            if council_tax_band == "Choose...":
+                council_tax_band = None
+        except PWTimeoutError:
+            council_tax_band = None
+
+        council_tax_exempt = await self.page.locator(
+            selectors.LISTING_PROPERTY_COUNCIL_TAX_EXEMPT
+        ).is_checked()
+
+        # Price:
+        price_modifier = await self.try_wait_for_locator(
+            selectors.LISTING_RENT_FREQ, extract_text=True
+        )
+        price = await self.try_wait_for_locator(
+            selectors.LISTING_PRICE_RENT, extract_attribute="value"
+        )
+        price = parse_rent(price or "", price_modifier)
+
+        # Description:
+        if property_type == "Studio":
+            bedrooms = 0
+        else:
+            bedrooms = await self.try_wait_for_locator(
+                selectors.LISTING_DESC_BEDROOMS, extract_text=True
+            )
+        bathrooms = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_BATHROOMS, extract_text=True
+        )
+        receptions = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_RECEPTIONS, extract_text=True
+        )
+        if not receptions:
+            receptions = "N/A"
+        floors = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_FLOORS, extract_text=True
+        )
+        if not floors:
+            floors = "N/A"
+
+        furnished = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_FURNISHED, extract_text=True
+        )
+        if not furnished or furnished == "Choose...":
+            furnished = "Unfurnished"  # Default to Unfurnished if not specified
+
+        available_from = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_AVAILABLE_FROM, extract_attribute="value"
+        )
+        available_from = (
+            datetime.strptime(available_from, "%d/%m/%Y").date()
+            if available_from
+            else datetime.now().date()
+        )
+
+        summary = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_SUMMARY, extract_text=True
+        )
+        description = await self.try_wait_for_locator(
+            selectors.LISTING_DESC_LONG_DESC, extract_text=True
+        )
+
+        # Features:
+        features_bills_included = [
+            await locator.is_checked()
+            for locator in await self.page.locator(
+                selectors.LISTING_FEATURES_BILLS_INCLUDED
+            ).all()
+        ]
+        features_outside_space = [
+            await locator.is_checked()
+            for locator in await self.page.locator(
+                selectors.LISTING_FEATURES_OUTSIDE_SPACE
+            ).all()
+        ]
+        features_parking = [
+            await locator.is_checked()
+            for locator in await self.page.locator(
+                selectors.LISTING_FEATURES_PARKING
+            ).all()
+        ]
+        features_accessibility = [
+            await locator.is_checked()
+            for locator in await self.page.locator(
+                selectors.LISTING_FEATURES_ACCESSIBILITY
+            ).all()
+        ]
+        features_other = [
+            await locator.is_checked()
+            for locator in await self.page.locator(
+                selectors.LISTING_FEATURES_OTHER
+            ).all()
+        ]
+
+        #         print("Scraped listing details:")
+        #         print(f"""{address=}
+        #                 {property_type=}
+        #                 {property_type_checkboxes=}
+        #                 {council_tax_band=}
+        #                 {council_tax_exempt=}
+        #                 {price=}
+        #                 {price_modifier=}
+        #                 {bedrooms=}
+        #                 {bathrooms=}
+        #                 {receptions=}
+        #                 {floors=}
+        #                 {furnished=}
+        #                 {available_from=}
+        #                 {summary=}
+        #                 {description=}
+        #                 {features_bills_included=}
+        #                 {features_outside_space=}
+        #                 {features_parking=}
+        #                 {features_accessibility=}
+        #                 {features_other=}
+        # """)
+
+        listing = PropertyListing(
+            source_provider="zoopla",
+            source_url=(
+                HttpUrl(listing_url.strip())
+                if not listing_url.startswith("file://")
+                else listing_url.strip()
+            ),
+            address=address,
+            property_type=property_type,
+            summary=summary or "",
+            description=description or "",
+            property_type_checkboxes=property_type_checkboxes,
+            rent_pcm=price,
+            bedrooms=int(bedrooms),
+            bathrooms=int(bathrooms),
+            receptions=receptions,
+            floors=floors,
+            furnished=furnished,
+            available_from=available_from,
+            council_tax_band="X" if council_tax_exempt else council_tax_band,
+            features=[
+                features_bills_included,
+                features_outside_space,
+                features_parking,
+                features_accessibility,
+                features_other,
+            ],
+        )
+        logger.debug("Scraped listing details: %s", listing)
+        return listing

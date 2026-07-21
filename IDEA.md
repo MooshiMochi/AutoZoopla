@@ -1,0 +1,1 @@
+A relister using playwright firefox to handle scraping, deleting, and relisting a property listing on zoopla. Also handles login pages and redirects. Implements a subproject of an image resizing UI with PySide6/Qt, that generates a txt file based on the order defined by the user in the UI
