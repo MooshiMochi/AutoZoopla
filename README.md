@@ -1,46 +1,55 @@
-# Property Re-listing automation using Playwright
+# AutoZoopla property relister
 
-## Commands
+AutoZoopla is a Playwright-based property relisting tool with one combined desktop application for both relisting and image ordering.
+
+## Install
 
 ```bash
 pip install -e .
-
 playwright install
 ```
 
-run the CLI tool with the following command:
+## Launch the combined desktop app
+
+```bash
+autozoopla
+```
+
+The existing command remains available as an alias:
+
+```bash
+relister-gui
+```
+
+The desktop app contains two pages:
+
+- **Relist property** configures and runs the source-to-destination relist workflow.
+- **Image organiser** selects visible images, changes their upload order and writes `instructions.txt` into the image folder.
+
+When an image directory is selected, the relist cannot start until the directory contains a valid, non-empty `instructions.txt`. Use **Organise** or **Open image organiser** to prepare that directory. Saving the order returns the folder to the relist page and marks it ready.
+
+When Playwright needs a login code or other user response, the app returns to the relist page, highlights and pulses the input panel, focuses the response field, alerts the application window and plays the system notification sound.
+
+## CLI
+
+Dry run:
 
 ```bash
 relister relist \
   --source zoopla \
   --destination zoopla \
-  --url "https://www.zoopla.co.uk/to-rent/details/12345678/"
+  --url "https://pro.zoopla.co.uk/properties/listing/1234567"
+```
 
+Publish with an ordered image directory:
+
+```bash
 relister relist \
   --source zoopla \
   --destination zoopla \
-  --url "https://www.zoopla.co.uk/to-rent/details/12345678/" \
+  --url "https://pro.zoopla.co.uk/properties/listing/1234567" \
+  --images "C:\\path\\to\\images" \
   --publish
-
-relister relist \
-  --source zoopla \
-  --destination zoopla \
-  --url "LISTING_URL"
-
 ```
 
-## Image Manager UI
-
-Install the desktop dependency first:
-
-```bash
-pip install -r requirements.txt
-```
-
-Then launch the image manager from the repo root:
-
-```bash
-python image_manager/src/main.py
-```
-
-The UI lets you pick a folder, reorder thumbnails by dragging, and save the current order to `instructions.txt` in that folder.
+The standalone `imager` command is retained for backwards compatibility, although the same organiser is now built into `autozoopla`.

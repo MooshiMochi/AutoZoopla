@@ -11,5 +11,6 @@ dependencies = [
 
 [project.scripts]
 relister = "relister.cli:main"
+autozoopla = "relister.gui.app:main"
 relister-gui = "relister.gui.app:main"
 imager = "image_manager.main:main"

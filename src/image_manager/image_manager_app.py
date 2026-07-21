@@ -34,7 +34,6 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGraphicsOpacityEffect,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListView,
@@ -46,6 +45,7 @@ from PySide6.QtWidgets import (
     QSlider,
     QSizePolicy,
     QStackedLayout,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -65,176 +65,6 @@ INSTRUCTIONS_FILENAME = "instructions.txt"
 DEFAULT_THUMBNAIL_SIZE = 104
 MIN_THUMBNAIL_SIZE = 56
 MAX_THUMBNAIL_SIZE = 180
-
-
-APP_STYLE = """
-QMainWindow, QWidget#windowRoot {
-    background: #f5f7fb;
-    color: #172033;
-    font-family: "Segoe UI", "Inter", sans-serif;
-    font-size: 10pt;
-}
-
-QFrame#toolbarCard, QFrame#statusCard {
-    background: #ffffff;
-    border: 1px solid #dfe5ee;
-    border-radius: 14px;
-}
-
-QLabel#titleLabel {
-    color: #111827;
-    font-size: 18pt;
-    font-weight: 700;
-}
-
-QLabel#subtitleLabel, QLabel#pathLabel, QLabel#statusLabel,
-QLabel#previewLabel {
-    color: #657087;
-}
-
-QLabel#pathLabel {
-    background: #f7f9fc;
-    border: 1px solid #e1e7f0;
-    border-radius: 8px;
-    padding: 7px 10px;
-}
-
-QPushButton {
-    min-height: 34px;
-    padding: 0 16px;
-    border-radius: 8px;
-    border: 1px solid #cfd7e4;
-    background: #ffffff;
-    color: #273449;
-    font-weight: 600;
-}
-
-QPushButton:hover {
-    background: #f3f6fa;
-    border-color: #aeb9c9;
-}
-
-QPushButton:pressed {
-    background: #e9eef5;
-}
-
-QPushButton#primaryButton {
-    background: #2563eb;
-    border-color: #2563eb;
-    color: #ffffff;
-}
-
-QPushButton#primaryButton:hover {
-    background: #1d4ed8;
-    border-color: #1d4ed8;
-}
-
-QPushButton:disabled {
-    background: #edf1f6;
-    border-color: #e1e6ee;
-    color: #9aa5b4;
-}
-
-QSlider::groove:horizontal {
-    height: 5px;
-    border-radius: 2px;
-    background: #dce3ee;
-}
-
-QSlider::sub-page:horizontal {
-    border-radius: 2px;
-    background: #5b84ee;
-}
-
-QSlider::handle:horizontal {
-    width: 16px;
-    margin: -6px 0;
-    border-radius: 8px;
-    background: #2563eb;
-}
-
-QListWidget#imageGrid {
-    background: transparent;
-    border: none;
-    outline: none;
-}
-
-QListWidget#imageGrid::item {
-    background: transparent;
-    border: none;
-}
-
-QFrame#imageCard {
-    background: #ffffff;
-    border: 1px solid #dfe5ee;
-    border-radius: 13px;
-}
-
-QFrame#imageCard:hover {
-    border-color: #9db5f5;
-}
-
-QLabel#thumbnailLabel {
-    background: #eef2f7;
-    border: 1px solid #e0e6ef;
-    border-radius: 10px;
-    color: #7a8699;
-}
-
-QLabel#filenameLabel {
-    color: #253047;
-    font-weight: 600;
-}
-
-QComboBox {
-    min-height: 29px;
-    padding: 0 9px;
-    border-radius: 7px;
-    font-weight: 600;
-}
-
-QComboBox[visibilityState="visible"] {
-    color: #147447;
-    background: #eaf8f0;
-    border: 1px solid #bee7cf;
-}
-
-QComboBox[visibilityState="hidden"] {
-    color: #697386;
-    background: #f0f2f5;
-    border: 1px solid #d9dee7;
-}
-
-QComboBox::drop-down {
-    width: 22px;
-    border: none;
-}
-
-QComboBox QAbstractItemView {
-    color: #172033;
-    background: #ffffff;
-    border: 1px solid #d9e0eb;
-    selection-background-color: #e9efff;
-    selection-color: #172033;
-}
-
-QFrame#skeletonCard {
-    background: #f0f4fb;
-    border: 2px dashed #8da8df;
-    border-radius: 13px;
-}
-
-QFrame#skeletonImage, QFrame#skeletonLine {
-    background: #dce5f4;
-    border: none;
-    border-radius: 8px;
-}
-
-QLabel#skeletonText {
-    color: #6880ae;
-    font-weight: 700;
-}
-"""
 
 
 @dataclass(frozen=True)
@@ -909,12 +739,14 @@ class ImageGrid(QListWidget):
         self._press_hotspot = QPoint()
 
 
-class MainWindow(QMainWindow):
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWindowTitle("Image Order Manager")
-        self.resize(1180, 800)
-        self.setMinimumSize(760, 560)
+class ImageOrderPage(QWidget):
+    """Embeddable image ordering page used by the combined desktop app."""
+
+    instructions_saved = Signal(str)
+    directory_changed = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
 
         self.current_directory: Path | None = None
         self.thumbnail_size = DEFAULT_THUMBNAIL_SIZE
@@ -924,11 +756,11 @@ class MainWindow(QMainWindow):
         ideal_threads = QThreadPool.globalInstance().maxThreadCount() or 4
         self.thread_pool.setMaxThreadCount(max(2, ideal_threads - 1))
 
-        title_label = QLabel("Image Order Manager")
+        title_label = QLabel("Image organiser")
         title_label.setObjectName("titleLabel")
 
         subtitle_label = QLabel(
-            "Drag a card to reorder it. The placeholder shows exactly where it will land."
+            "Choose which images will be uploaded and drag them into the correct order."
         )
         subtitle_label.setObjectName("subtitleLabel")
 
@@ -941,7 +773,7 @@ class MainWindow(QMainWindow):
         self.pick_button = QPushButton("Choose folder")
         self.pick_button.clicked.connect(self.choose_directory)
 
-        self.save_button = QPushButton("Save order")
+        self.save_button = QPushButton("Save image order")
         self.save_button.setObjectName("primaryButton")
         self.save_button.setEnabled(False)
         self.save_button.clicked.connect(self.save_order)
@@ -957,20 +789,47 @@ class MainWindow(QMainWindow):
         self.grid = ImageGrid()
         self.grid.order_changed.connect(self.refresh_status)
 
+        # Reflowing toolbar: title/subtitle stack on the left, actions on the
+        # right, path and slider below. The subtitle wraps rather than being
+        # truncated as the window narrows.
+        subtitle_label.setWordWrap(True)
+
         toolbar = QFrame()
         toolbar.setObjectName("toolbarCard")
-        toolbar_layout = QGridLayout(toolbar)
-        toolbar_layout.setContentsMargins(18, 16, 18, 16)
-        toolbar_layout.setHorizontalSpacing(12)
-        toolbar_layout.setVerticalSpacing(10)
-        toolbar_layout.addWidget(title_label, 0, 0, 1, 2)
-        toolbar_layout.addWidget(subtitle_label, 1, 0, 1, 2)
-        toolbar_layout.addWidget(self.pick_button, 0, 2)
-        toolbar_layout.addWidget(self.save_button, 0, 3)
-        toolbar_layout.addWidget(self.path_label, 2, 0, 1, 4)
-        toolbar_layout.addWidget(self.preview_label, 3, 0)
-        toolbar_layout.addWidget(self.preview_slider, 3, 1, 1, 3)
-        toolbar_layout.setColumnStretch(1, 1)
+        toolbar_layout = QVBoxLayout(toolbar)
+        toolbar_layout.setContentsMargins(22, 18, 22, 18)
+        toolbar_layout.setSpacing(12)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(12)
+        header_text = QVBoxLayout()
+        header_text.setSpacing(3)
+        header_text.addWidget(title_label)
+        header_text.addWidget(subtitle_label)
+
+        header_buttons = QHBoxLayout()
+        header_buttons.setSpacing(10)
+        header_buttons.addWidget(self.pick_button)
+        header_buttons.addWidget(self.save_button)
+
+        header_row.addLayout(header_text, 1)
+        header_row.addLayout(header_buttons)
+        header_row.setAlignment(header_buttons, Qt.AlignmentFlag.AlignTop)
+        toolbar_layout.addLayout(header_row)
+        toolbar_layout.addWidget(self.path_label)
+
+        slider_row = QHBoxLayout()
+        slider_row.setSpacing(12)
+        slider_row.addWidget(self.preview_label)
+        slider_row.addWidget(self.preview_slider, 1)
+        toolbar_layout.addLayout(slider_row)
+
+        # Swap between an empty-state prompt and the image grid.
+        self.empty_state = self._build_empty_state()
+        self.content_stack = QStackedWidget()
+        self.content_stack.addWidget(self.empty_state)
+        self.content_stack.addWidget(self.grid)
+        self.content_stack.setCurrentWidget(self.empty_state)
 
         self.status_label = QLabel("Choose a folder containing images to begin.")
         self.status_label.setObjectName("statusLabel")
@@ -979,18 +838,16 @@ class MainWindow(QMainWindow):
         status_card = QFrame()
         status_card.setObjectName("statusCard")
         status_layout = QHBoxLayout(status_card)
-        status_layout.setContentsMargins(14, 10, 14, 10)
+        status_layout.setContentsMargins(16, 11, 16, 11)
         status_layout.addWidget(self.status_label)
 
-        root = QWidget()
-        root.setObjectName("windowRoot")
-        root_layout = QVBoxLayout(root)
-        root_layout.setContentsMargins(18, 18, 18, 18)
-        root_layout.setSpacing(12)
+        self.setObjectName("imageOrderPage")
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(26, 24, 26, 24)
+        root_layout.setSpacing(14)
         root_layout.addWidget(toolbar)
-        root_layout.addWidget(self.grid, 1)
+        root_layout.addWidget(self.content_stack, 1)
         root_layout.addWidget(status_card)
-        self.setCentralWidget(root)
 
         self.grid.set_thumbnail_size(self.thumbnail_size)
 
@@ -1012,6 +869,49 @@ class MainWindow(QMainWindow):
         self.preview_label.setText(f"Thumbnail size: {self.thumbnail_size}px")
         self.grid.set_thumbnail_size(self.thumbnail_size)
 
+    def _build_empty_state(self) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("emptyState")
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(24, 40, 24, 40)
+        layout.setSpacing(12)
+        layout.addStretch(1)
+
+        glyph = QLabel("+")
+        glyph.setObjectName("emptyGlyph")
+        glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        glyph.setFixedSize(64, 64)
+
+        title = QLabel("No folder selected yet")
+        title.setObjectName("emptyTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Explicit line break: a word-wrapped QLabel centred in a layout
+        # collapses to a single elided line, so lay the two lines out directly.
+        body = QLabel(
+            "Choose a folder of listing images to preview them, mark which to\n"
+            "upload and drag them into the order buyers will see."
+        )
+        body.setObjectName("emptyBody")
+        body.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        cta = QPushButton("Choose folder")
+        cta.setObjectName("primaryButton")
+        cta.setFixedWidth(170)
+        cta.clicked.connect(self.choose_directory)
+
+        layout.addWidget(glyph, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(title)
+        layout.addWidget(body, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addWidget(cta, alignment=Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(1)
+        return frame
+
+    def _show_empty_state(self, message: str) -> None:
+        self.content_stack.setCurrentWidget(self.empty_state)
+        self.status_label.setText(message)
+        self.save_button.setEnabled(False)
+
     def choose_directory(self) -> None:
         directory = QFileDialog.getExistingDirectory(
             self,
@@ -1025,10 +925,20 @@ class MainWindow(QMainWindow):
         if self.current_directory is not None:
             self.load_directory(self.current_directory)
 
-    def load_directory(self, directory: Path) -> None:
+    def load_directory(self, directory: Path) -> bool:
+        directory = directory.expanduser()
         self.grid.cancel_drag()
+
+        if not directory.is_dir():
+            self.current_directory = None
+            self.path_label.setText(str(directory))
+            self.grid.clear()
+            self._show_empty_state("The selected folder does not exist.")
+            return False
+
         self.current_directory = directory
         self.path_label.setText(str(directory))
+        self.directory_changed.emit(str(directory))
 
         self.load_generation += 1
         generation = self.load_generation
@@ -1038,20 +948,18 @@ class MainWindow(QMainWindow):
         try:
             images = load_images(directory)
         except OSError as exc:
-            self.status_label.setText(f"Could not read this folder: {exc}")
-            self.save_button.setEnabled(False)
-            return
+            self._show_empty_state(f"Could not read this folder: {exc}")
+            return False
 
         images = parse_instruction_order(directory, images)
-        # images = apply_saved_visibility(directory, images)
 
         if not images:
-            self.status_label.setText("No supported images were found in this folder.")
-            self.save_button.setEnabled(False)
-            return
+            self._show_empty_state("No supported images were found in this folder.")
+            return False
 
         self.status_label.setText(f"Loading {len(images)} images…")
         self.save_button.setEnabled(True)
+        self.content_stack.setCurrentWidget(self.grid)
 
         for entry in images:
             item = QListWidgetItem()
@@ -1072,6 +980,7 @@ class MainWindow(QMainWindow):
             self.thread_pool.start(task)
 
         self.refresh_status()
+        return True
 
     @Slot(int, str, object)
     def handle_thumbnail_loaded(
@@ -1104,7 +1013,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText(
             f"{total} image{'s' if total != 1 else ''} · "
             f"{visible} visible · {hidden} hidden · "
-            "Drag anywhere on an image card to reorder it; press Esc to cancel a drag."
+            "Drag anywhere on a card to reorder it; press Esc to cancel a drag."
         )
 
     def ordered_entries(self) -> list[tuple[str, str]]:
@@ -1137,6 +1046,13 @@ class MainWindow(QMainWindow):
             return
 
         visible_names = [name for name, status in entries if status == "visible"]
+        if not visible_names:
+            QMessageBox.warning(
+                self,
+                "No visible images",
+                "At least one image must be marked Visible before the order can be saved.",
+            )
+            return
 
         instructions_path = self.current_directory / INSTRUCTIONS_FILENAME
 
@@ -1158,21 +1074,51 @@ class MainWindow(QMainWindow):
         )
         QMessageBox.information(
             self,
-            "Saved",
+            "Image order saved",
             f"Saved the visible image order to:\n{instructions_path}",
         )
+        self.instructions_saved.emit(str(self.current_directory))
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+    def shutdown(self) -> None:
         self.grid.cancel_drag()
         self.thread_pool.clear()
         self.thread_pool.waitForDone(1500)
+
+
+class MainWindow(QMainWindow):
+    """Compatibility wrapper for launching the organiser by itself."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setWindowTitle("Image Organiser")
+        self.resize(1180, 800)
+        self.setMinimumSize(760, 560)
+        self.page = ImageOrderPage(self)
+        self.setCentralWidget(self.page)
+
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        self.page.shutdown()
         super().closeEvent(event)
+
+
+def _shared_stylesheet() -> str:
+    """Return the shared app theme, tolerating a missing relister package.
+
+    The organiser is normally styled by the host window's stylesheet; when run
+    standalone it pulls in the same shared theme so the two surfaces match.
+    """
+
+    try:
+        from relister.gui.theme import build_stylesheet
+    except Exception:  # pragma: no cover - standalone fallback
+        return ""
+    return build_stylesheet()
 
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Image Order Manager")
-    app.setStyleSheet(APP_STYLE)
+    app.setApplicationName("Image Organiser")
+    app.setStyleSheet(_shared_stylesheet())
 
     window = MainWindow()
     window.show()

@@ -9,8 +9,8 @@ from .main_window import MainWindow
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("Relister")
-    app.setOrganizationName("Relister")
+    app.setApplicationName("AutoZoopla")
+    app.setOrganizationName("AutoZoopla")
 
     window = MainWindow()
     window.show()

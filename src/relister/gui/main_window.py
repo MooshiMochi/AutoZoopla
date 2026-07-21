@@ -5,14 +5,23 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSettings, Qt, QThread
-from PySide6.QtGui import QCloseEvent, QStandardItemModel
+from PySide6.QtCore import (
+    QEasingCurve,
+    QPropertyAnimation,
+    QSettings,
+    Qt,
+    QThread,
+    QTimer,
+)
+from PySide6.QtGui import QCloseEvent, QColor, QStandardItemModel
 from PySide6.QtWidgets import (
-    QCheckBox,
+    QApplication,
+    QButtonGroup,
     QComboBox,
     QFileDialog,
-    QFormLayout,
-    QGroupBox,
+    QFrame,
+    QGraphicsDropShadowEffect,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,15 +30,24 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
-    QSplitter,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
+)
+
+from image_manager.image_manager_app import (
+    INSTRUCTIONS_FILENAME,
+    ImageOrderPage,
+    is_supported_image,
+    load_images,
 )
 
 from .logging_handler import LogEmitter, QtLogHandler
 from .prompt_bridge import PromptBridge
 from .relist_worker import RelistRequest, RelistWorker
+from .theme import ChevronCombo, ModernCheckBox, build_stylesheet
 
 logger = logging.getLogger(__name__)
 
@@ -43,20 +61,27 @@ class ProviderOption:
 
 PROVIDERS = (
     ProviderOption("Zoopla", "zoopla"),
-    ProviderOption("Expert OnTheMarket (coming soon)", "onthemarket", False),
+    ProviderOption("OnTheMarket (coming soon)", "onthemarket", False),
 )
 
 
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Relister")
-        self.setMinimumSize(920, 700)
+        self.setWindowTitle("AutoZoopla")
+        self.resize(1220, 820)
+        # Sized so the whole page - including the console and the input section -
+        # is visible without scrolling. Minimum width is a touch wider than the
+        # content needs; minimum height fits the full layout.
+        self.setMinimumSize(910, 760)
 
         self._settings = QSettings("Relister", "RelisterDesktop")
         self._thread: QThread | None = None
         self._worker: RelistWorker | None = None
         self._close_when_finished = False
+        self._running = False
+        self._images_ready = True
+        self._organizer_return_to_relist = False
 
         self._prompt_bridge = PromptBridge()
         self._prompt_bridge.prompt_requested.connect(self._show_prompt)
@@ -73,82 +98,247 @@ class MainWindow(QMainWindow):
         )
         logging.getLogger().addHandler(self._log_handler)
 
+        self._images_validation_timer = QTimer(self)
+        self._images_validation_timer.setSingleShot(True)
+        self._images_validation_timer.setInterval(250)
+        self._images_validation_timer.timeout.connect(self._validate_images_directory)
+
         self._build_ui()
         self._restore_settings()
+        self._validate_images_directory()
         self._set_running(False)
 
     def _build_ui(self) -> None:
-        central = QWidget(self)
-        root = QVBoxLayout(central)
-        root.setContentsMargins(18, 18, 18, 18)
-        root.setSpacing(14)
-        self.setCentralWidget(central)
+        shell = QFrame(self)
+        shell.setObjectName("appRoot")
+        shell_layout = QHBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(0)
+        self.setCentralWidget(shell)
 
-        title = QLabel("Property Relister")
-        title.setObjectName("titleLabel")
-        subtitle = QLabel(
-            "Scrape and recreate property listings without using the command line."
+        sidebar = self._build_sidebar()
+        shell_layout.addWidget(sidebar)
+
+        self.pages = QStackedWidget()
+        self.pages.setObjectName("pageStack")
+        shell_layout.addWidget(self.pages, 1)
+
+        self.relist_page = self._build_relist_page()
+        self.image_page = ImageOrderPage()
+        self.image_page.instructions_saved.connect(self._on_image_instructions_saved)
+        self.image_page.directory_changed.connect(self._on_organizer_directory_changed)
+
+        self.pages.addWidget(self.relist_page)
+        self.pages.addWidget(self.image_page)
+        self._switch_page(0)
+
+        self._apply_styles()
+
+    def _build_sidebar(self) -> QFrame:
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
+        sidebar.setFixedWidth(220)
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(10, 22, 10, 18)
+        layout.setSpacing(8)
+
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(12)
+        brand_mark = QLabel("AZ")
+        brand_mark.setObjectName("brandMark")
+        brand_mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_mark.setFixedSize(44, 44)
+
+        brand_text = QVBoxLayout()
+        brand_text.setSpacing(1)
+        brand_title = QLabel("AutoZoopla")
+        brand_title.setObjectName("brandTitle")
+        brand_subtitle = QLabel("Relister workspace")
+        brand_subtitle.setObjectName("brandSubtitle")
+        brand_text.addWidget(brand_title)
+        brand_text.addWidget(brand_subtitle)
+
+        brand_row.addWidget(brand_mark)
+        brand_row.addLayout(brand_text, 1)
+        layout.addLayout(brand_row)
+        layout.addSpacing(26)
+
+        section_label = QLabel("WORKSPACE")
+        section_label.setObjectName("sidebarSection")
+        layout.addWidget(section_label)
+
+        self.nav_group = QButtonGroup(self)
+        self.nav_group.setExclusive(True)
+
+        self.nav_relist = QPushButton("Relist property")
+        self.nav_relist.setObjectName("navButton")
+        self.nav_relist.setCheckable(True)
+        self.nav_relist.clicked.connect(self._open_relist_from_navigation)
+
+        self.nav_images = QPushButton("Image organiser")
+        self.nav_images.setObjectName("navButton")
+        self.nav_images.setCheckable(True)
+        self.nav_images.clicked.connect(self._open_organizer_from_navigation)
+
+        self.nav_group.addButton(self.nav_relist, 0)
+        self.nav_group.addButton(self.nav_images, 1)
+        layout.addWidget(self.nav_relist)
+        layout.addWidget(self.nav_images)
+        layout.addStretch(1)
+
+        self.sidebar_hint = QLabel(
+            "Prepare image order first, then run the relisting workflow from one place."
         )
-        subtitle.setObjectName("subtitleLabel")
-        root.addWidget(title)
-        root.addWidget(subtitle)
+        self.sidebar_hint.setObjectName("sidebarHint")
+        self.sidebar_hint.setWordWrap(True)
+        layout.addWidget(self.sidebar_hint)
 
-        configuration_group = QGroupBox("Relist configuration")
-        form = QFormLayout(configuration_group)
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
-        form.setHorizontalSpacing(18)
-        form.setVerticalSpacing(12)
+        return sidebar
 
+    def _build_relist_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("relistPage")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+        page_layout.setSpacing(0)
+
+        page_layout.addWidget(self._build_top_banner())
+
+        # The scroll area is a safety net; at the default and minimum window
+        # sizes the whole page - console and input section included - fits
+        # without scrolling.
+        self.relist_scroll = QScrollArea()
+        self.relist_scroll.setWidgetResizable(True)
+        self.relist_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.relist_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        page_layout.addWidget(self.relist_scroll, 1)
+
+        body = QWidget()
+        body.setObjectName("relistBody")
+        root = QVBoxLayout(body)
+        root.setContentsMargins(20, 14, 20, 14)
+        root.setSpacing(9)
+        self.relist_scroll.setWidget(body)
+
+        # Header: description and status badge. There is no oversized page
+        # title - the sidebar already names the active section.
+        header = QHBoxLayout()
+        self.page_subtitle = QLabel(
+            "Scrape an existing advert, prepare its images and recreate the listing."
+        )
+        self.page_subtitle.setObjectName("pageSubtitle")
+        self.page_subtitle.setWordWrap(True)
+
+        self.run_badge = QLabel("READY")
+        self.run_badge.setObjectName("runBadge")
+        self.run_badge.setProperty("state", "ready")
+        self.run_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        header.addWidget(self.page_subtitle, 1)
+        header.addWidget(self.run_badge, 0, Qt.AlignmentFlag.AlignVCenter)
+        root.addLayout(header)
+
+        # Configuration card ----------------------------------------------
+        configuration_card = QFrame()
+        configuration_card.setObjectName("card")
+        configuration_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        configuration_layout = QVBoxLayout(configuration_card)
+        configuration_layout.setContentsMargins(16, 12, 16, 12)
+        configuration_layout.setSpacing(10)
+
+        # Providers - two columns, section tag inline with the field labels.
         self.source_combo = self._create_provider_combo()
         self.destination_combo = self._create_provider_combo()
+        providers_grid = QGridLayout()
+        providers_grid.setHorizontalSpacing(14)
+        providers_grid.setVerticalSpacing(4)
+        providers_grid.addWidget(self._field_label("Source provider"), 0, 0)
+        providers_grid.addWidget(self._field_label("Destination provider"), 0, 1)
+        providers_grid.addWidget(self.source_combo, 1, 0)
+        providers_grid.addWidget(self.destination_combo, 1, 1)
+        providers_grid.setColumnStretch(0, 1)
+        providers_grid.setColumnStretch(1, 1)
+        configuration_layout.addLayout(self._section_row("PROVIDERS", providers_grid))
 
+        # Listing
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(
             "https://pro.zoopla.co.uk/properties/listing/..."
         )
         self.url_edit.setClearButtonEnabled(True)
+        self.url_edit.textChanged.connect(self._update_start_state)
+        listing_content = QVBoxLayout()
+        listing_content.setContentsMargins(0, 0, 0, 0)
+        listing_content.setSpacing(4)
+        listing_content.addWidget(self._field_label("Original listing URL"))
+        listing_content.addWidget(self.url_edit)
+        configuration_layout.addLayout(self._section_row("LISTING", listing_content))
 
-        images_container = QWidget()
-        images_row = QHBoxLayout(images_container)
-        images_row.setContentsMargins(0, 0, 0, 0)
-        images_row.setSpacing(8)
-
+        # Images
         self.images_edit = QLineEdit()
         self.images_edit.setPlaceholderText(
-            "Folder containing images and instructions.txt"
+            "Select a folder containing listing images"
         )
         self.images_edit.setClearButtonEnabled(True)
-        self.browse_button = QPushButton("Browse...")
+        self.images_edit.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        self.images_edit.textChanged.connect(self._schedule_images_validation)
+
+        self.browse_button = QPushButton("Browse")
         self.browse_button.clicked.connect(self._browse_images_directory)
+        self.organize_button = QPushButton("Organise")
+        self.organize_button.setObjectName("secondaryAccentButton")
+        self.organize_button.clicked.connect(self._open_selected_images_in_organizer)
+
+        images_row = QHBoxLayout()
+        images_row.setContentsMargins(0, 0, 0, 0)
+        images_row.setSpacing(8)
         images_row.addWidget(self.images_edit, 1)
         images_row.addWidget(self.browse_button)
+        images_row.addWidget(self.organize_button)
 
-        options_container = QWidget()
-        options_row = QHBoxLayout(options_container)
+        images_content = QVBoxLayout()
+        images_content.setContentsMargins(0, 0, 0, 0)
+        images_content.setSpacing(4)
+        images_content.addWidget(
+            self._field_label("Replacement image folder (optional)")
+        )
+        images_content.addLayout(images_row)
+        configuration_layout.addLayout(self._section_row("IMAGES", images_content))
+
+        # Options - deliberately unlabelled, aligned under the field column.
+        options_row = QHBoxLayout()
         options_row.setContentsMargins(0, 0, 0, 0)
-        options_row.setSpacing(24)
-
-        self.publish_checkbox = QCheckBox("Publish listing")
+        options_row.setSpacing(18)
+        self.publish_checkbox = ModernCheckBox("Publish listing")
         self.publish_checkbox.setToolTip(
             "When unticked, the workflow runs in dry-run mode."
         )
-        self.headless_checkbox = QCheckBox("Run browser headlessly")
-        self.verbose_checkbox = QCheckBox("Verbose logs")
+        self.headless_checkbox = ModernCheckBox("Run browser headlessly")
+        self.verbose_checkbox = ModernCheckBox("Verbose logs")
         self.verbose_checkbox.setChecked(True)
-
         options_row.addWidget(self.publish_checkbox)
         options_row.addWidget(self.headless_checkbox)
         options_row.addWidget(self.verbose_checkbox)
         options_row.addStretch(1)
+        configuration_layout.addLayout(self._section_row("", options_row))
 
-        form.addRow("Source provider", self.source_combo)
-        form.addRow("Destination provider", self.destination_combo)
-        form.addRow("Original listing URL", self.url_edit)
-        form.addRow("Images directory", images_container)
-        form.addRow("Options", options_container)
-        root.addWidget(configuration_group)
+        root.addWidget(configuration_card)
 
-        actions = QHBoxLayout()
+        # Action bar -------------------------------------------------------
+        action_bar = QFrame()
+        action_bar.setObjectName("actionBar")
+        action_bar.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
+        )
+        actions = QHBoxLayout(action_bar)
+        actions.setContentsMargins(14, 8, 14, 8)
         actions.setSpacing(10)
 
         self.start_button = QPushButton("Start relist")
@@ -156,6 +346,7 @@ class MainWindow(QMainWindow):
         self.start_button.clicked.connect(self._start_relist)
 
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("dangerButton")
         self.cancel_button.clicked.connect(self._cancel_relist)
 
         self.clear_logs_button = QPushButton("Clear output")
@@ -164,64 +355,168 @@ class MainWindow(QMainWindow):
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 0)
         self.progress_bar.setTextVisible(False)
-        self.progress_bar.setMaximumWidth(170)
+        self.progress_bar.setMaximumWidth(150)
 
         self.status_label = QLabel("Ready")
+        self.status_label.setObjectName("workflowStatus")
         self.status_label.setSizePolicy(
-            QSizePolicy.Policy.Expanding,
-            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
         )
 
         actions.addWidget(self.start_button)
         actions.addWidget(self.cancel_button)
         actions.addWidget(self.clear_logs_button)
-        actions.addSpacing(8)
+        actions.addSpacing(6)
         actions.addWidget(self.progress_bar)
         actions.addWidget(self.status_label, 1)
-        root.addLayout(actions)
+        root.addWidget(action_bar)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
+        # Program output ---------------------------------------------------
+        output_card = QFrame()
+        output_card.setObjectName("card")
+        output_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding
+        )
+        output_layout = QVBoxLayout(output_card)
+        output_layout.setContentsMargins(16, 10, 16, 12)
+        output_layout.setSpacing(7)
 
-        output_group = QGroupBox("Program output")
-        output_layout = QVBoxLayout(output_group)
+        output_header = QHBoxLayout()
+        output_title = QLabel("Program output")
+        output_title.setObjectName("cardTitle")
+        self.output_hint = QLabel("Live workflow and browser automation logs")
+        self.output_hint.setObjectName("cardSubtitle")
+        output_header.addWidget(output_title)
+        output_header.addStretch(1)
+        output_header.addWidget(self.output_hint)
+        output_layout.addLayout(output_header)
+
         self.output_edit = QPlainTextEdit()
+        self.output_edit.setObjectName("logOutput")
         self.output_edit.setReadOnly(True)
         self.output_edit.setPlaceholderText(
             "Workflow logs and progress messages will appear here."
         )
         self.output_edit.document().setMaximumBlockCount(5_000)
+        self.output_edit.setMinimumHeight(120)
         output_layout.addWidget(self.output_edit)
+        root.addWidget(output_card, 1)
 
-        input_group = QGroupBox("User input")
-        input_layout = QVBoxLayout(input_group)
-        self.prompt_label = QLabel(
-            "No action is required. Login codes and questions will appear here."
+        # User input section - always visible below the output, disabled until
+        # the workflow asks for input.
+        root.addWidget(self._build_input_section())
+
+        return page
+
+    def _build_top_banner(self) -> QFrame:
+        self.top_banner = QFrame()
+        self.top_banner.setObjectName("topBanner")
+        self.top_banner.setProperty("state", "warning")
+        self.top_banner.setMaximumHeight(0)  # collapsed until a message appears
+
+        layout = QHBoxLayout(self.top_banner)
+        layout.setContentsMargins(20, 9, 18, 9)
+        layout.setSpacing(10)
+
+        self.top_banner_icon = QLabel("!")
+        self.top_banner_icon.setObjectName("topBannerIcon")
+        self.top_banner_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.top_banner_icon.setFixedSize(24, 24)
+
+        self.top_banner_label = QLabel("")
+        self.top_banner_label.setObjectName("topBannerText")
+        self.top_banner_label.setWordWrap(True)
+
+        self.top_banner_action = QPushButton("Open image organiser")
+        self.top_banner_action.setObjectName("inlineActionButton")
+        self.top_banner_action.clicked.connect(self._open_selected_images_in_organizer)
+        self.top_banner_action.setVisible(False)
+
+        layout.addWidget(self.top_banner_icon)
+        layout.addWidget(self.top_banner_label, 1)
+        layout.addWidget(self.top_banner_action)
+
+        self._banner_anim = QPropertyAnimation(self.top_banner, b"maximumHeight", self)
+        self._banner_anim.setDuration(200)
+        self._banner_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        return self.top_banner
+
+    def _build_input_section(self) -> QFrame:
+        self.prompt_card = QFrame()
+        self.prompt_card.setObjectName("promptCard")
+        self.prompt_card.setProperty("active", False)
+        self.prompt_card.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum
         )
+        layout = QVBoxLayout(self.prompt_card)
+        layout.setContentsMargins(16, 10, 16, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        self.prompt_title = QLabel("User input")
+        self.prompt_title.setObjectName("promptTitle")
+        self.prompt_badge = QLabel("NO INPUT NEEDED")
+        self.prompt_badge.setObjectName("promptBadge")
+        header.addWidget(self.prompt_title)
+        header.addStretch(1)
+        header.addWidget(self.prompt_badge)
+        layout.addLayout(header)
+
+        self.prompt_label = QLabel(
+            "This box stays disabled until the workflow needs a login code or an "
+            "answer to continue."
+        )
+        self.prompt_label.setObjectName("promptMessage")
         self.prompt_label.setWordWrap(True)
+        layout.addWidget(self.prompt_label)
 
-        prompt_row = QHBoxLayout()
+        row = QHBoxLayout()
+        row.setSpacing(10)
         self.prompt_edit = QLineEdit()
+        self.prompt_edit.setObjectName("promptInput")
+        self.prompt_edit.setProperty("active", False)
         self.prompt_edit.setPlaceholderText("Enter the requested value")
+        self.prompt_edit.setEnabled(False)
         self.prompt_edit.returnPressed.connect(self._submit_prompt)
-        self.submit_prompt_button = QPushButton("Submit")
+        self.submit_prompt_button = QPushButton("Submit response")
+        self.submit_prompt_button.setObjectName("attentionButton")
+        self.submit_prompt_button.setEnabled(False)
         self.submit_prompt_button.clicked.connect(self._submit_prompt)
-        prompt_row.addWidget(self.prompt_edit, 1)
-        prompt_row.addWidget(self.submit_prompt_button)
+        row.addWidget(self.prompt_edit, 1)
+        row.addWidget(self.submit_prompt_button)
+        layout.addLayout(row)
 
-        input_layout.addWidget(self.prompt_label)
-        input_layout.addLayout(prompt_row)
+        # An accent-coloured glow on the input box while input is requested.
+        self._prompt_glow = QGraphicsDropShadowEffect(self.prompt_edit)
+        self._prompt_glow.setBlurRadius(16)
+        self._prompt_glow.setOffset(0, 0)
+        self._prompt_glow.setColor(QColor(79, 70, 229, 190))
+        self._prompt_glow.setEnabled(False)
+        self.prompt_edit.setGraphicsEffect(self._prompt_glow)
 
-        splitter.addWidget(output_group)
-        splitter.addWidget(input_group)
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-        splitter.setSizes([440, 130])
-        root.addWidget(splitter, 1)
+        return self.prompt_card
 
-        self._apply_styles()
+    def _section_row(self, tag_text: str, content_layout) -> QHBoxLayout:
+        """A form section: a small-caps tag inline (left) with its field(s)."""
+
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(12)
+        tag = QLabel(tag_text)
+        tag.setObjectName("groupLabel")
+        tag.setFixedWidth(72)
+        row.addWidget(tag, 0, Qt.AlignmentFlag.AlignTop)
+        row.addLayout(content_layout, 1)
+        return row
+
+    @staticmethod
+    def _field_label(text: str) -> QLabel:
+        label = QLabel(text)
+        label.setObjectName("fieldLabel")
+        return label
 
     def _create_provider_combo(self) -> QComboBox:
-        combo = QComboBox()
+        combo = ChevronCombo()
         for option in PROVIDERS:
             combo.addItem(option.label, option.key)
             if not option.enabled:
@@ -233,45 +528,7 @@ class MainWindow(QMainWindow):
         return combo
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet(
-            """
-            QLabel#titleLabel {
-                font-size: 24px;
-                font-weight: 700;
-            }
-            QLabel#subtitleLabel {
-                color: palette(mid);
-                margin-bottom: 4px;
-            }
-            QGroupBox {
-                font-weight: 600;
-                border: 1px solid palette(midlight);
-                border-radius: 8px;
-                margin-top: 10px;
-                padding-top: 12px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 12px;
-                padding: 0 5px;
-            }
-            QLineEdit, QComboBox, QPlainTextEdit {
-                border: 1px solid palette(midlight);
-                border-radius: 6px;
-                padding: 7px;
-            }
-            QPushButton {
-                border: 1px solid palette(midlight);
-                border-radius: 6px;
-                padding: 7px 14px;
-            }
-            QPushButton#primaryButton {
-                font-weight: 700;
-                padding-left: 20px;
-                padding-right: 20px;
-            }
-            """
-        )
+        self.setStyleSheet(build_stylesheet())
 
     def _restore_settings(self) -> None:
         geometry = self._settings.value("window_geometry")
@@ -286,7 +543,11 @@ class MainWindow(QMainWindow):
             self.destination_combo,
             str(self._settings.value("destination", "zoopla")),
         )
+        self.url_edit.setText(str(self._settings.value("listing_url", "")))
         self.images_edit.setText(str(self._settings.value("images_directory", "")))
+        self.publish_checkbox.setChecked(
+            self._as_bool(self._settings.value("publish", False))
+        )
         self.headless_checkbox.setChecked(
             self._as_bool(self._settings.value("headless", False))
         )
@@ -310,9 +571,65 @@ class MainWindow(QMainWindow):
         self._settings.setValue("window_geometry", self.saveGeometry())
         self._settings.setValue("source", self.source_combo.currentData())
         self._settings.setValue("destination", self.destination_combo.currentData())
+        self._settings.setValue("listing_url", self.url_edit.text().strip())
         self._settings.setValue("images_directory", self.images_edit.text().strip())
+        self._settings.setValue("publish", self.publish_checkbox.isChecked())
         self._settings.setValue("headless", self.headless_checkbox.isChecked())
         self._settings.setValue("verbose", self.verbose_checkbox.isChecked())
+
+    def _switch_page(self, index: int) -> None:
+        self.pages.setCurrentIndex(index)
+        button = self.nav_group.button(index)
+        if button is not None:
+            button.setChecked(True)
+
+    def _open_relist_from_navigation(self, *_: object) -> None:
+        self._organizer_return_to_relist = False
+        self._switch_page(0)
+
+    def _open_organizer_from_navigation(self, *_: object) -> None:
+        self._organizer_return_to_relist = False
+        images_text = self.images_edit.text().strip()
+        if images_text and Path(images_text).is_dir():
+            self.image_page.load_directory(Path(images_text))
+        self._switch_page(1)
+
+    def _open_selected_images_in_organizer(self) -> None:
+        images_text = self.images_edit.text().strip()
+        if not images_text:
+            self._organizer_return_to_relist = True
+            self._switch_page(1)
+            self.image_page.choose_directory()
+            return
+
+        images_path = Path(images_text)
+        if not images_path.is_dir():
+            self._validation_error(
+                f"The images path is not a directory:\n{images_path}"
+            )
+            return
+
+        self._organizer_return_to_relist = True
+        self.image_page.load_directory(images_path)
+        self._switch_page(1)
+
+    def _on_organizer_directory_changed(self, directory: str) -> None:
+        if self._organizer_return_to_relist:
+            self.status_label.setText(f"Organising images in {directory}")
+
+    def _on_image_instructions_saved(self, directory: str) -> None:
+        self.images_edit.setText(directory)
+        self._validate_images_directory()
+        self.status_label.setText("Image order saved. The relist is ready to continue.")
+
+        if self._organizer_return_to_relist:
+            self._organizer_return_to_relist = False
+            self._switch_page(0)
+            self.url_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _schedule_images_validation(self, *_: object) -> None:
+        self._images_validation_timer.start()
+        self._update_start_state()
 
     def _browse_images_directory(self) -> None:
         initial = self.images_edit.text().strip() or str(Path.home())
@@ -321,29 +638,211 @@ class MainWindow(QMainWindow):
             "Select listing images directory",
             initial,
         )
-        if selected:
-            self.images_edit.setText(selected)
+        if not selected:
+            return
+
+        self.images_edit.setText(selected)
+        ready = self._validate_images_directory()
+        if not ready:
+            self._offer_image_directory_resolution(Path(selected))
+
+    def _offer_image_directory_resolution(self, images_path: Path) -> None:
+        if not images_path.is_dir():
+            return
+
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Image order required")
+        box.setText("This image folder is not ready for relisting.")
+        box.setInformativeText(
+            f"{INSTRUCTIONS_FILENAME} is missing, empty or invalid. Open the image "
+            "organiser to choose the visible images and save their order, or select "
+            "a different folder."
+        )
+        organise = box.addButton(
+            "Open image organiser",
+            QMessageBox.ButtonRole.AcceptRole,
+        )
+        choose_another = box.addButton(
+            "Choose another folder",
+            QMessageBox.ButtonRole.ActionRole,
+        )
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.exec()
+
+        if box.clickedButton() is organise:
+            self._open_selected_images_in_organizer()
+        elif box.clickedButton() is choose_another:
+            QTimer.singleShot(0, self._browse_images_directory)
+
+    def _validate_images_directory(self) -> bool:
+        images_text = self.images_edit.text().strip()
+        if not images_text:
+            self._images_ready = True
+            self._set_image_status(
+                "neutral",
+                "i",
+                "No replacement image folder selected. Existing scraped images will be used.",
+                action_visible=False,
+            )
+            self._update_start_state()
+            return True
+
+        images_path = Path(images_text)
+        if not images_path.is_dir():
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                "The selected image folder does not exist. Choose a different folder.",
+                action_visible=False,
+            )
+            self._update_start_state()
+            return False
+
+        try:
+            images = load_images(images_path)
+        except OSError as exc:
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                f"The selected image folder could not be read: {exc}",
+                action_visible=False,
+            )
+            self._update_start_state()
+            return False
+
+        if not images:
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                "No supported images were found in this folder. Select a different folder.",
+                action_visible=False,
+            )
+            self._update_start_state()
+            return False
+
+        instructions_path = images_path / INSTRUCTIONS_FILENAME
+        if not instructions_path.is_file():
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                f"{INSTRUCTIONS_FILENAME} is missing. Run the image organiser before continuing.",
+                action_visible=True,
+            )
+            self._update_start_state()
+            return False
+
+        try:
+            ordered_names = [
+                line.strip()
+                for line in instructions_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+        except OSError as exc:
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                f"{INSTRUCTIONS_FILENAME} could not be read: {exc}",
+                action_visible=True,
+            )
+            self._update_start_state()
+            return False
+
+        if not ordered_names:
+            self._images_ready = False
+            self._set_image_status(
+                "warning",
+                "!",
+                f"{INSTRUCTIONS_FILENAME} is empty. Open the image organiser and save at least one visible image.",
+                action_visible=True,
+            )
+            self._update_start_state()
+            return False
+
+        missing = [
+            name
+            for name in ordered_names
+            if not is_supported_image(images_path / name)
+        ]
+        if missing:
+            self._images_ready = False
+            preview = ", ".join(missing[:3])
+            suffix = "…" if len(missing) > 3 else ""
+            self._set_image_status(
+                "warning",
+                "!",
+                f"The saved order refers to missing or unsupported files: {preview}{suffix}. Re-save the image order.",
+                action_visible=True,
+            )
+            self._update_start_state()
+            return False
+
+        self._images_ready = True
+        self._set_image_status(
+            "ready",
+            "✓",
+            f"Image folder ready: {len(ordered_names)} image{'s' if len(ordered_names) != 1 else ''} will be uploaded in the saved order.",
+            action_visible=False,
+        )
+        self._update_start_state()
+        return True
+
+    def _set_image_status(
+        self,
+        state: str,
+        icon: str,
+        message: str,
+        *,
+        action_visible: bool,
+    ) -> None:
+        # The image-folder status is surfaced as a banner that slides down from
+        # the top of the page. "neutral" (no folder selected) shows nothing.
+        del icon  # the banner picks its own icon per state
+        if state == "neutral":
+            self._hide_top_banner()
+            return
+        banner_state = "ready" if state == "ready" else "warning"
+        self._show_top_banner(banner_state, message, action_visible=action_visible)
+
+    def _show_top_banner(
+        self, state: str, message: str, *, action_visible: bool
+    ) -> None:
+        self.top_banner_label.setText(message)
+        self.top_banner_icon.setText("✓" if state == "ready" else "!")
+        self.top_banner_action.setVisible(action_visible)
+        self._set_dynamic_property(self.top_banner, "state", state)
+
+        target = self.top_banner.sizeHint().height()
+        self._banner_anim.stop()
+        self._banner_anim.setStartValue(self.top_banner.maximumHeight())
+        self._banner_anim.setEndValue(target)
+        self._banner_anim.start()
+
+    def _hide_top_banner(self) -> None:
+        if self.top_banner.maximumHeight() == 0:
+            return
+        self._banner_anim.stop()
+        self._banner_anim.setStartValue(self.top_banner.maximumHeight())
+        self._banner_anim.setEndValue(0)
+        self._banner_anim.start()
 
     def _build_request(self) -> RelistRequest | None:
         listing_url = self.url_edit.text().strip()
         if not listing_url:
             self._validation_error("Enter the original listing URL.")
+            self.url_edit.setFocus(Qt.FocusReason.OtherFocusReason)
             return None
 
         images_text = self.images_edit.text().strip()
         images_path = Path(images_text) if images_text else None
-        if images_path is not None:
-            if not images_path.is_dir():
-                self._validation_error(
-                    f"The images path is not a directory:\n{images_path}"
-                )
-                return None
-            if not (images_path / "instructions.txt").is_file():
-                self._validation_error(
-                    "instructions.txt was not found in the selected images "
-                    f"directory:\n{images_path}"
-                )
-                return None
+        if images_path is not None and not self._validate_images_directory():
+            self._offer_image_directory_resolution(images_path)
+            return None
 
         if self.publish_checkbox.isChecked():
             answer = QMessageBox.question(
@@ -412,7 +911,7 @@ class MainWindow(QMainWindow):
     def _cancel_relist(self) -> None:
         if self._worker is None:
             return
-        self.status_label.setText("Cancelling...")
+        self.status_label.setText("Cancelling…")
         self.cancel_button.setEnabled(False)
         self._worker.request_cancel()
 
@@ -464,9 +963,16 @@ class MainWindow(QMainWindow):
             self.close()
 
     def _set_running(self, running: bool) -> None:
-        self.start_button.setEnabled(not running)
+        self._running = running
         self.cancel_button.setEnabled(running)
         self.progress_bar.setVisible(running)
+
+        self._set_dynamic_property(
+            self.run_badge,
+            "state",
+            "running" if running else "ready",
+        )
+        self.run_badge.setText("RUNNING" if running else "READY")
 
         for widget in (
             self.source_combo,
@@ -474,6 +980,7 @@ class MainWindow(QMainWindow):
             self.url_edit,
             self.images_edit,
             self.browse_button,
+            self.organize_button,
             self.publish_checkbox,
             self.headless_checkbox,
             self.verbose_checkbox,
@@ -484,7 +991,37 @@ class MainWindow(QMainWindow):
             self.prompt_edit.setEnabled(False)
             self.submit_prompt_button.setEnabled(False)
 
+        self._update_start_state()
+
+    def _update_start_state(self, *_: object) -> None:
+        if not hasattr(self, "start_button"):
+            return
+
+        has_url = bool(self.url_edit.text().strip())
+        can_start = not self._running and has_url and self._images_ready
+        self.start_button.setEnabled(can_start)
+
+        if self._running:
+            reason = "A relist operation is currently running."
+        elif not has_url:
+            reason = "Enter the original listing URL first."
+        elif not self._images_ready:
+            reason = "Prepare the selected image folder before continuing."
+        else:
+            reason = "Start the relisting workflow."
+        self.start_button.setToolTip(reason)
+
+    def _set_prompt_active(self, active: bool) -> None:
+        """Toggle the accent glow + border on the always-present input box."""
+
+        self._prompt_glow.setEnabled(active)
+        self._set_dynamic_property(self.prompt_edit, "active", active)
+        self._set_dynamic_property(self.prompt_card, "active", active)
+
     def _show_prompt(self, prompt: str, sensitive: bool) -> None:
+        self._switch_page(0)
+        self.prompt_title.setText("Action required")
+        self.prompt_badge.setText("INPUT REQUIRED")
         self.prompt_label.setText(prompt)
         self.prompt_edit.clear()
         self.prompt_edit.setEchoMode(
@@ -492,8 +1029,21 @@ class MainWindow(QMainWindow):
         )
         self.prompt_edit.setEnabled(True)
         self.submit_prompt_button.setEnabled(True)
-        self.prompt_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._set_prompt_active(True)
         self.status_label.setText("Waiting for user input")
+        self._set_dynamic_property(self.run_badge, "state", "attention")
+        self.run_badge.setText("ACTION NEEDED")
+
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+        self.prompt_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+
+        app = QApplication.instance()
+        if app is not None:
+            app.alert(self, 0)
+            app.beep()
 
     def _submit_prompt(self) -> None:
         if not self._prompt_bridge.is_waiting:
@@ -501,17 +1051,40 @@ class MainWindow(QMainWindow):
         response = self.prompt_edit.text()
         self.prompt_edit.setEnabled(False)
         self.submit_prompt_button.setEnabled(False)
+        self._set_prompt_active(False)
+        self.prompt_badge.setText("SUBMITTED")
+        self.prompt_label.setText("Response submitted. The workflow is continuing…")
         self._prompt_bridge.submit_response(response)
-        self.status_label.setText("Continuing...")
+        self.status_label.setText("Continuing…")
 
     def _clear_prompt(self) -> None:
+        self._set_prompt_active(False)
+
+        self.prompt_title.setText("User input")
+        self.prompt_badge.setText("NO INPUT NEEDED")
         self.prompt_label.setText(
-            "No action is required. Login codes and questions will appear here."
+            "This box stays disabled until the workflow needs a login code or an "
+            "answer to continue."
         )
         self.prompt_edit.clear()
         self.prompt_edit.setEchoMode(QLineEdit.EchoMode.Normal)
         self.prompt_edit.setEnabled(False)
         self.submit_prompt_button.setEnabled(False)
+
+        self._set_dynamic_property(
+            self.run_badge,
+            "state",
+            "running" if self._running else "ready",
+        )
+        self.run_badge.setText("RUNNING" if self._running else "READY")
+
+    @staticmethod
+    def _set_dynamic_property(widget: QWidget, name: str, value: Any) -> None:
+        widget.setProperty(name, value)
+        style = widget.style()
+        style.unpolish(widget)
+        style.polish(widget)
+        widget.update()
 
     def _append_log(self, message: str) -> None:
         self.output_edit.appendPlainText(message)
@@ -525,6 +1098,7 @@ class MainWindow(QMainWindow):
         self._save_settings()
 
         if self._worker is None:
+            self.image_page.shutdown()
             logging.getLogger().removeHandler(self._log_handler)
             event.accept()
             return
