@@ -15,7 +15,7 @@
 			"request": "launch",
 			"program": "${workspaceFolder}/src/relister/cli.py",
 			"args": [
-				"relist", "--source", "zoopla", "--destination", "zoopla", "--url", "https://pro.zoopla.co.uk/properties/listing/5324554"],
+				"relist", "--source", "zoopla", "--destination", "zoopla", "--url", "https://pro.zoopla.co.uk/properties/listing/5356300", "--verbose"],
 			"console": "integratedTerminal"
 		}
 	]
