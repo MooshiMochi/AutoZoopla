@@ -8,6 +8,9 @@
      URL paste, save on Start, and old→new ID migration on relist.
   3. Prepare the project to be bundled as a macOS app with a Sparkle auto-updater,
      built on a GitHub Actions macOS runner.
+  4. Replace the `.env` credential store with an encrypted, OS-keychain-backed
+     credential store edited from the UI (a gear next to each provider dropdown), and
+     encrypt the browser session at rest (hashed filename + encrypted contents).
 
 ## Problem / motivation
 
@@ -32,6 +35,8 @@
 - No Apple Developer account work performed blind: notarization/Developer-ID signing is
   scaffolded with documented secret placeholders, not fully wired.
 - No heavy DB migration framework; `CREATE TABLE IF NOT EXISTS` + a `user_version` pragma.
+- No master-password / passphrase scheme for the encryption key (keychain chosen for
+  zero-friction). No per-field cloud sync of credentials.
 
 ---
 
@@ -53,6 +58,7 @@ gui/
     __init__.py
     top_banner.py         # slide-down status banner (extracted from main_window)
     prompt_panel.py       # user-input panel + accent glow (extracted)
+    credentials_dialog.py # gear -> per-provider username/password editor (Subsystem 2b)
     form_helpers.py       # section_row(), field_label()
   services/
     __init__.py
@@ -124,12 +130,14 @@ New `core/paths.py` — a Qt-free app-data resolver used by GUI, CLI and browser
 - Linux: `~/.local/share/AutoZoopla/`
 
 Exposes `data_dir()`, `database_path()` (`<data>/relister.db`),
+`credentials_path()` (`<data>/credentials.enc`),
 `browser_states_dir()` (`<data>/browser_states`), `browser_cache_dir()`
 (`<data>/ms-playwright`, overridable by `PLAYWRIGHT_BROWSERS_PATH`). No `QStandardPaths`
 (it needs a running QApplication and isn't available to the CLI/session).
 
 `browser/session.py` switches its hardcoded relative `data/browser_states` to
-`paths.browser_states_dir()` so state survives bundling and a changing cwd.
+`paths.browser_states_dir()` so state survives bundling and a changing cwd, and its
+session files become encrypted with a hashed filename (see *Subsystem 2b*).
 
 ### Storage package
 
@@ -181,6 +189,70 @@ needing credentials.
 
 Threading: the worker never touches SQLite. Lookup (URL edit) and migration
 (`_on_success` slot) both run on the GUI thread, so short-lived connections are safe.
+
+---
+
+## Subsystem 2b — Credentials & at-rest encryption
+
+Ships with phase 2 (both are app-data/storage concerns). The gear UI depends on the
+modular `RelistPage` from phase 1.
+
+### Key management & cipher
+
+New `core/security.py`:
+
+- `get_cipher() -> Fernet` — returns a `cryptography.fernet.Fernet` keyed by a random
+  32-byte key. The key is stored in the **OS keychain** via `keyring`
+  (service `"AutoZoopla"`, key name `"encryption-key"`): generated with
+  `Fernet.generate_key()` on first use, retrieved thereafter. macOS → Keychain,
+  Windows → Credential Manager (so it also works on the Windows dev box).
+- `hash_name(*parts: str) -> str` — HMAC-SHA256 of the parts, keyed by the app key,
+  hex-truncated; used to derive opaque, non-correlatable session filenames.
+- New dependencies: **`keyring`** and **`cryptography`** (added to core deps).
+
+### Encrypted credential store
+
+New `storage/credentials.py` — `CredentialStore` backed by the Fernet-encrypted JSON at
+`core.paths.credentials_path()`. Data shape: `{ "<provider>|<role>": {username, password} }`
+where `role ∈ {"source","destination"}` (matching today's source/destination accounts).
+
+- `get(provider, role) -> tuple[str, str] | None`
+- `set(provider, role, username, password) -> None`
+- `has(provider, role) -> bool`
+
+Plaintext credentials never touch disk — only the Fernet ciphertext blob does.
+
+### Wiring & `.env` removal
+
+- `providers/factory.py`: `get_provider(name, *, destination=False)` reads
+  `(username, password)` from `CredentialStore` (role = destination? "destination" :
+  "source") instead of `Settings`. Signature unchanged, so GUI **and** CLI are covered.
+- `core/config.py`: the `zoopla_*` / `onthemarket_*` credential fields are removed;
+  credentials no longer come from `.env`. A one-time migration helper imports any
+  existing `.env` credentials into the store on first run if the store is empty, after
+  which `.env` can be deleted. (`Settings`/`pydantic-settings` is retained only if other
+  non-secret config needs it; otherwise removed.)
+- `.env.example` and README updated: credentials are entered in-app, not via `.env`.
+
+### Session encryption (`browser/session.py`)
+
+- **Filename:** `hash_name(provider.name, provider.account.alias) + ".enc"` — no longer
+  leaks the account email.
+- **Contents:** on save, `context.storage_state()` (dict, no path) → JSON → Fernet
+  encrypt → write the `.enc` file. On load, read `.enc` → Fernet decrypt → dict → pass
+  `storage_state=<dict>` to `new_context(...)`. Playwright never reads/writes plaintext
+  state to disk. Missing/undecryptable file → treated as "no session" (fresh login).
+
+### Gear UI (in `RelistPage`)
+
+- A small gear `QToolButton` sits next to each provider `ChevronCombo` (source and
+  destination). Clicking opens `gui/widgets/credentials_dialog.py`
+  `CredentialsDialog(provider_key, role)`: username/email field + masked password field
+  (with a reveal toggle), Save / Cancel. Prefilled from `CredentialStore` when present.
+- The gear targets whichever provider is currently selected in its dropdown; a subtle
+  indicator (e.g. gear tint / "✓ credentials saved" hint) reflects `store.has(...)`.
+- Save writes through `CredentialStore`; no restart needed (`get_provider` reads the
+  store per run).
 
 ---
 
@@ -262,18 +334,22 @@ key-generation instructions.
 
 1. **UI modularization** — pure refactor; verified by import/launch smoke test + the
    existing render harness (no visual change) + new `ImagesValidator` unit tests.
-2. **Database integration** — depends on `core/paths.py`; verified by repo unit tests
-   (get/set/migrate incl. the new-id-exists replace case) and a manual prefill/save/
-   migrate walkthrough.
+2. **Database integration + credentials/encryption (2b)** — depends on `core/paths.py`
+   and `core/security.py`; verified by repo unit tests (get/set/migrate incl. the
+   new-id-exists replace case), `CredentialStore` round-trip tests, and a manual
+   prefill/save/migrate + gear-dialog + encrypted-session walkthrough.
 3. **Packaging + updater** — scaffolding + CI; authored and static-checked on Windows,
    really verified on the macOS runner / a Mac (build succeeds, Sparkle shows the
    three-button dialog against a test appcast, pkg postinstall lands browsers).
 
 ## Verification
 
-- **Subsystems 1–2 (local, Windows):** `pytest` for `ImagesValidator` and
-  `PropertyImagesRepo`; offscreen import + short-lived launch of `autozoopla` to confirm
-  the modular shell wires up and pages register.
+- **Subsystems 1–2/2b (local, Windows):** `pytest` for `ImagesValidator`,
+  `PropertyImagesRepo`, `CredentialStore` (encrypt/decrypt round-trip against a fake
+  keyring backend), and session encrypt→decrypt→dict; offscreen import + short-lived
+  launch of `autozoopla` to confirm the modular shell wires up, pages register, and the
+  gear dialog opens. `keyring` uses an in-memory backend under test so no real keychain
+  is touched.
 - **Subsystem 3 (macOS/CI only):** the GitHub Actions run builds the `.app`, produces
   DMG + PKG, signs + generates the appcast; Sparkle update flow and pkg browser install
   confirmed on a Mac. Explicitly out of reach from the Windows dev box.
@@ -291,3 +367,7 @@ key-generation instructions.
   render checks.
 - **pkg postinstall as root** writing to a per-user cache is the classic footgun;
   avoided by the machine-wide `PLAYWRIGHT_BROWSERS_PATH`.
+- **Keychain access & key loss:** macOS may prompt to allow keychain access on first
+  use; if the keychain key is lost/reset, the encrypted credentials and session become
+  undecryptable — handled gracefully by treating them as absent (re-enter credentials /
+  re-login) rather than crashing. The key never leaves the OS secret store.
