@@ -280,15 +280,31 @@ QPushButton#inlineActionButton {
 }
 QPushButton#inlineActionButton:hover { background: #fff7ed; }
 
-/* Top banner (slides down from the top of the relist page) ----------------- */
+/* Top banner (overlays the top of the relist page) -------------------------- */
 QFrame#topBanner { background: #fff7ed; border: none; border-bottom: 1px solid #fed7aa; }
-QFrame#topBanner[state="ready"] { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; }
+QFrame#topBanner[state="success"] { background: #f0fdf4; border-bottom: 1px solid #bbf7d0; }
+QFrame#topBanner[state="error"] { background: #fef2f2; border-bottom: 1px solid #fecaca; }
 QLabel#topBannerIcon {
     color: #c2410c; background: #ffedd5; border-radius: 12px; font-weight: 800;
 }
-QFrame#topBanner[state="ready"] QLabel#topBannerIcon { color: #15803d; background: #dcfce7; }
+QFrame#topBanner[state="success"] QLabel#topBannerIcon { color: #15803d; background: #dcfce7; }
+QFrame#topBanner[state="error"] QLabel#topBannerIcon { color: #b91c1c; background: #fee2e2; }
 QLabel#topBannerText { color: #9a3412; font-size: 12.5px; font-weight: 600; }
-QFrame#topBanner[state="ready"] QLabel#topBannerText { color: #15803d; }
+QFrame#topBanner[state="success"] QLabel#topBannerText { color: #15803d; }
+QFrame#topBanner[state="error"] QLabel#topBannerText { color: #b91c1c; }
+QPushButton#topBannerClose {
+    min-height: 30px; padding: 0; border: none; border-radius: 15px;
+    background: transparent; color: #64748b; font-size: 21px; font-weight: 500;
+}
+QPushButton#topBannerClose:hover { background: #ffffffaa; color: #334155; }
+QPushButton#topBannerClose:pressed { background: #ffffffdd; }
+
+QLabel#imageStatusLabel {
+    font-size: 11.5px; font-weight: 650;
+}
+QLabel#imageStatusLabel[state="success"] { color: #15803d; }
+QLabel#imageStatusLabel[state="error"] { color: #b91c1c; }
+QLabel#imageStatusLabel[state="warning"] { color: #c2410c; }
 
 /* Console & workflow status ------------------------------------------------ */
 QPlainTextEdit#logOutput {

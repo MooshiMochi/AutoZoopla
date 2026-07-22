@@ -6,9 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import (
+    QEvent,
     QEasingCurve,
     QPropertyAnimation,
     QSettings,
+    QRect,
     Qt,
     QThread,
     QTimer,
@@ -73,7 +75,7 @@ class MainWindow(QMainWindow):
         # Sized so the whole page - including the console and the input section -
         # is visible without scrolling. Minimum width is a touch wider than the
         # content needs; minimum height fits the full layout.
-        self.setMinimumSize(910, 760)
+        self.setMinimumSize(1050, 770)
 
         self._settings = QSettings("Relister", "RelisterDesktop")
         self._thread: QThread | None = None
@@ -199,11 +201,10 @@ class MainWindow(QMainWindow):
     def _build_relist_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("relistPage")
+        self.relist_page = page
         page_layout = QVBoxLayout(page)
         page_layout.setContentsMargins(0, 0, 0, 0)
         page_layout.setSpacing(0)
-
-        page_layout.addWidget(self._build_top_banner())
 
         # The scroll area is a safety net; at the default and minimum window
         # sizes the whole page - console and input section included - fits
@@ -215,6 +216,8 @@ class MainWindow(QMainWindow):
             Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
         page_layout.addWidget(self.relist_scroll, 1)
+        page.installEventFilter(self)
+        self._build_top_banner(page)
 
         body = QWidget()
         body.setObjectName("relistBody")
@@ -281,9 +284,7 @@ class MainWindow(QMainWindow):
 
         # Images
         self.images_edit = QLineEdit()
-        self.images_edit.setPlaceholderText(
-            "Select a folder containing listing images"
-        )
+        self.images_edit.setPlaceholderText("Select a folder containing listing images")
         self.images_edit.setClearButtonEnabled(True)
         self.images_edit.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -306,9 +307,21 @@ class MainWindow(QMainWindow):
         images_content = QVBoxLayout()
         images_content.setContentsMargins(0, 0, 0, 0)
         images_content.setSpacing(4)
-        images_content.addWidget(
+        image_label_row = QHBoxLayout()
+        image_label_row.setContentsMargins(0, 0, 0, 0)
+        image_label_row.setSpacing(8)
+        image_label_row.addWidget(
             self._field_label("Replacement image folder (optional)")
         )
+        image_label_row.addStretch(1)
+        self.image_status_label = QLabel()
+        self.image_status_label.setObjectName("imageStatusLabel")
+        self.image_status_label.setAlignment(
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+        )
+        self.image_status_label.setVisible(False)
+        image_label_row.addWidget(self.image_status_label)
+        images_content.addLayout(image_label_row)
         images_content.addLayout(images_row)
         configuration_layout.addLayout(self._section_row("IMAGES", images_content))
 
@@ -408,11 +421,12 @@ class MainWindow(QMainWindow):
 
         return page
 
-    def _build_top_banner(self) -> QFrame:
-        self.top_banner = QFrame()
+    def _build_top_banner(self, page: QWidget) -> QFrame:
+        self.top_banner = QFrame(page)
         self.top_banner.setObjectName("topBanner")
-        self.top_banner.setProperty("state", "warning")
-        self.top_banner.setMaximumHeight(0)  # collapsed until a message appears
+        self.top_banner.setProperty("state", "success")
+        self.top_banner.setGeometry(0, 0, page.width(), 0)
+        self.top_banner.setVisible(False)
 
         layout = QHBoxLayout(self.top_banner)
         layout.setContentsMargins(20, 9, 18, 9)
@@ -427,19 +441,42 @@ class MainWindow(QMainWindow):
         self.top_banner_label.setObjectName("topBannerText")
         self.top_banner_label.setWordWrap(True)
 
-        self.top_banner_action = QPushButton("Open image organiser")
-        self.top_banner_action.setObjectName("inlineActionButton")
-        self.top_banner_action.clicked.connect(self._open_selected_images_in_organizer)
-        self.top_banner_action.setVisible(False)
+        self.top_banner_close = QPushButton("×")
+        self.top_banner_close.setObjectName("topBannerClose")
+        self.top_banner_close.setAccessibleName("Close status banner")
+        self.top_banner_close.setToolTip("Close status banner")
+        self.top_banner_close.setFixedSize(30, 30)
+        self.top_banner_close.clicked.connect(self._hide_top_banner)
 
         layout.addWidget(self.top_banner_icon)
         layout.addWidget(self.top_banner_label, 1)
-        layout.addWidget(self.top_banner_action)
+        layout.addWidget(self.top_banner_close)
 
-        self._banner_anim = QPropertyAnimation(self.top_banner, b"maximumHeight", self)
+        self._banner_anim = QPropertyAnimation(self.top_banner, b"geometry", self)
         self._banner_anim.setDuration(200)
         self._banner_anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._banner_anim.finished.connect(self._finish_banner_animation)
+        self._banner_hiding = False
         return self.top_banner
+
+    def eventFilter(self, watched: QWidget, event: QEvent) -> bool:
+        if (
+            watched is getattr(self, "relist_page", None)
+            and event.type() == QEvent.Type.Resize
+        ):
+            self._position_top_banner()
+        return super().eventFilter(watched, event)
+
+    def _position_top_banner(self) -> None:
+        if not hasattr(self, "top_banner"):
+            return
+        self.top_banner.setGeometry(
+            0,
+            0,
+            self.relist_page.width(),
+            self.top_banner.height(),
+        )
+        self.top_banner.raise_()
 
     def _build_input_section(self) -> QFrame:
         self.prompt_card = QFrame()
@@ -681,7 +718,6 @@ class MainWindow(QMainWindow):
             self._images_ready = True
             self._set_image_status(
                 "neutral",
-                "i",
                 "No replacement image folder selected. Existing scraped images will be used.",
                 action_visible=False,
             )
@@ -692,8 +728,7 @@ class MainWindow(QMainWindow):
         if not images_path.is_dir():
             self._images_ready = False
             self._set_image_status(
-                "warning",
-                "!",
+                "error",
                 "The selected image folder does not exist. Choose a different folder.",
                 action_visible=False,
             )
@@ -705,8 +740,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self._images_ready = False
             self._set_image_status(
-                "warning",
-                "!",
+                "error",
                 f"The selected image folder could not be read: {exc}",
                 action_visible=False,
             )
@@ -717,7 +751,6 @@ class MainWindow(QMainWindow):
             self._images_ready = False
             self._set_image_status(
                 "warning",
-                "!",
                 "No supported images were found in this folder. Select a different folder.",
                 action_visible=False,
             )
@@ -729,7 +762,6 @@ class MainWindow(QMainWindow):
             self._images_ready = False
             self._set_image_status(
                 "warning",
-                "!",
                 f"{INSTRUCTIONS_FILENAME} is missing. Run the image organiser before continuing.",
                 action_visible=True,
             )
@@ -745,8 +777,7 @@ class MainWindow(QMainWindow):
         except OSError as exc:
             self._images_ready = False
             self._set_image_status(
-                "warning",
-                "!",
+                "error",
                 f"{INSTRUCTIONS_FILENAME} could not be read: {exc}",
                 action_visible=True,
             )
@@ -757,7 +788,6 @@ class MainWindow(QMainWindow):
             self._images_ready = False
             self._set_image_status(
                 "warning",
-                "!",
                 f"{INSTRUCTIONS_FILENAME} is empty. Open the image organiser and save at least one visible image.",
                 action_visible=True,
             )
@@ -765,9 +795,7 @@ class MainWindow(QMainWindow):
             return False
 
         missing = [
-            name
-            for name in ordered_names
-            if not is_supported_image(images_path / name)
+            name for name in ordered_names if not is_supported_image(images_path / name)
         ]
         if missing:
             self._images_ready = False
@@ -775,7 +803,6 @@ class MainWindow(QMainWindow):
             suffix = "…" if len(missing) > 3 else ""
             self._set_image_status(
                 "warning",
-                "!",
                 f"The saved order refers to missing or unsupported files: {preview}{suffix}. Re-save the image order.",
                 action_visible=True,
             )
@@ -784,8 +811,7 @@ class MainWindow(QMainWindow):
 
         self._images_ready = True
         self._set_image_status(
-            "ready",
-            "✓",
+            "success",
             f"Image folder ready: {len(ordered_names)} image{'s' if len(ordered_names) != 1 else ''} will be uploaded in the saved order.",
             action_visible=False,
         )
@@ -795,41 +821,58 @@ class MainWindow(QMainWindow):
     def _set_image_status(
         self,
         state: str,
-        icon: str,
         message: str,
         *,
         action_visible: bool,
     ) -> None:
-        # The image-folder status is surfaced as a banner that slides down from
-        # the top of the page. "neutral" (no folder selected) shows nothing.
-        del icon  # the banner picks its own icon per state
+        del action_visible
         if state == "neutral":
-            self._hide_top_banner()
+            self.image_status_label.setVisible(False)
             return
-        banner_state = "ready" if state == "ready" else "warning"
-        self._show_top_banner(banner_state, message, action_visible=action_visible)
 
-    def _show_top_banner(
-        self, state: str, message: str, *, action_visible: bool
-    ) -> None:
+        self.image_status_label.setText(message)
+        self._set_dynamic_property(self.image_status_label, "state", state)
+        self.image_status_label.setVisible(True)
+
+    def _show_top_banner(self, state: str, message: str) -> None:
         self.top_banner_label.setText(message)
-        self.top_banner_icon.setText("✓" if state == "ready" else "!")
-        self.top_banner_action.setVisible(action_visible)
+        self.top_banner_icon.setText("✓" if state == "success" else "!")
         self._set_dynamic_property(self.top_banner, "state", state)
 
-        target = self.top_banner.sizeHint().height()
+        width = self.relist_page.width()
+        target_height = self.top_banner.sizeHint().height()
+        start_height = self.top_banner.height() if self.top_banner.isVisible() else 0
+        start = QRect(0, 0, width, start_height)
+        end = QRect(0, 0, width, target_height)
         self._banner_anim.stop()
-        self._banner_anim.setStartValue(self.top_banner.maximumHeight())
-        self._banner_anim.setEndValue(target)
+        self._banner_hiding = False
+        self.top_banner.setGeometry(start)
+        self.top_banner.setVisible(True)
+        self.top_banner.raise_()
+        self._banner_anim.setStartValue(start)
+        self._banner_anim.setEndValue(end)
         self._banner_anim.start()
 
     def _hide_top_banner(self) -> None:
-        if self.top_banner.maximumHeight() == 0:
+        if self.top_banner.isHidden() and self.top_banner.height() == 0:
             return
+        width = self.relist_page.width()
+        start = self.top_banner.geometry()
+        end = QRect(0, 0, width, 0)
         self._banner_anim.stop()
-        self._banner_anim.setStartValue(self.top_banner.maximumHeight())
-        self._banner_anim.setEndValue(0)
+        self._banner_hiding = True
+        self._banner_anim.setStartValue(start)
+        self._banner_anim.setEndValue(end)
         self._banner_anim.start()
+
+    def _finish_banner_animation(self) -> None:
+        if self._banner_hiding:
+            self.top_banner.setGeometry(0, 0, self.relist_page.width(), 0)
+            self.top_banner.setVisible(False)
+            self._banner_hiding = False
+        else:
+            self.top_banner.setVisible(True)
+            self._position_top_banner()
 
     def _build_request(self) -> RelistRequest | None:
         listing_url = self.url_edit.text().strip()
@@ -934,12 +977,15 @@ class MainWindow(QMainWindow):
             if result.destination_listing_url:
                 logger.info("New listing URL: %s", result.destination_listing_url)
             self.status_label.setText("Listing published successfully")
+            self._show_top_banner("success", "Listing published successfully")
         else:
             logger.info("Dry run completed. No listing was published.")
             self.status_label.setText("Dry run completed")
+            self._show_top_banner("success", "Dry run completed successfully")
 
     def _on_failure(self, error_message: str) -> None:
         self.status_label.setText("Relist failed")
+        self._show_top_banner("error", f"Relist failed: {error_message}")
         QMessageBox.critical(
             self,
             "Relist failed",
