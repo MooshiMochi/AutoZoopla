@@ -1,0 +1,79 @@
+name: Release (macOS)
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install ".[build,macos]"
+
+      - name: Build .app
+        run: pyinstaller packaging/AutoZoopla.spec
+
+      - name: Read version
+        id: version
+        run: |
+          V=$(python -c 'import runpy,os; print(runpy.run_path(os.path.join("src","relister","__version__.py"))["__version__"])')
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Codesign app (Developer ID)
+        if: ${{ env.APPLE_DEVELOPER_ID != '' }}
+        run: |
+          codesign --deep --force --options runtime \
+            --entitlements packaging/entitlements.plist \
+            --sign "$APPLE_DEVELOPER_ID" dist/AutoZoopla.app
+
+      - name: Build DMG and PKG
+        run: |
+          bash packaging/make_dmg.sh "${{ steps.version.outputs.version }}"
+          bash packaging/make_pkg.sh "${{ steps.version.outputs.version }}"
+
+      - name: Notarize DMG
+        if: ${{ env.APPLE_ID != '' }}
+        run: |
+          xcrun notarytool submit "dist/AutoZoopla-${{ steps.version.outputs.version }}.dmg" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple "dist/AutoZoopla-${{ steps.version.outputs.version }}.dmg"
+
+      - name: Sign update and generate appcast (Sparkle)
+        if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
+        run: |
+          # Sparkle's binary tools are vendored under tools/sparkle/bin (see
+          # packaging/README.md). generate_appcast writes the EdDSA signatures
+          # and produces/updates appcast.xml for the dist folder.
+          printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_private_key
+          ./tools/sparkle/bin/generate_appcast --ed-key-file sparkle_private_key dist/
+          rm -f sparkle_private_key
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AutoZoopla-*.dmg
+            dist/AutoZoopla-*.pkg
+            dist/appcast.xml

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>AutoZoopla</string>
+    <key>CFBundleDisplayName</key>
+    <string>AutoZoopla</string>
+    <key>CFBundleIdentifier</key>
+    <string>co.uk.rsestateagents.autozoopla</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>0.1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+
+    <!-- Sparkle auto-update configuration. -->
+    <!-- Replace SUFeedURL with the release-hosted appcast, and SUPublicEDKey
+         with the EdDSA public key printed by Sparkle's `generate_keys`. -->
+    <key>SUFeedURL</key>
+    <string>https://github.com/OWNER/REPO/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+</dict>
+</plist>

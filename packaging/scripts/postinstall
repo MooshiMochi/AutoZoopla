@@ -1,0 +1,27 @@
+#!/bin/bash
+# Runs as root at .pkg install time. Downloads the Playwright browsers the app
+# needs (Firefox preferred, WebKit fallback) into a machine-wide location that
+# the app also reads via PLAYWRIGHT_BROWSERS_PATH.
+#
+# Kept in sync with _MACOS_BROWSER_CACHE in src/relister/gui/app.py.
+set -euo pipefail
+
+BROWSERS_DIR="/Library/Application Support/AutoZoopla/ms-playwright"
+APP="/Applications/AutoZoopla.app"
+PYTHON="$APP/Contents/MacOS/AutoZoopla"
+
+mkdir -p "$BROWSERS_DIR"
+export PLAYWRIGHT_BROWSERS_PATH="$BROWSERS_DIR"
+
+# The frozen app ships Playwright's Python package; invoke its installer.
+# Fall back to a system python3 if present.
+if "$PYTHON" -m playwright install firefox webkit >/dev/null 2>&1; then
+    :
+elif command -v python3 >/dev/null 2>&1; then
+    python3 -m playwright install firefox webkit || true
+fi
+
+# Make the cache world-readable so any user account can launch the browsers.
+chmod -R a+rX "$BROWSERS_DIR" || true
+
+exit 0
