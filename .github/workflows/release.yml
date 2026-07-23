@@ -40,12 +40,21 @@ jobs:
           V=$(python -c 'import runpy,os; print(runpy.run_path(os.path.join("src","relister","__version__.py"))["__version__"])')
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
-      - name: Codesign app (Developer ID)
-        if: ${{ env.APPLE_DEVELOPER_ID != '' }}
+      - name: Codesign app
         run: |
-          codesign --deep --force --options runtime \
-            --entitlements packaging/entitlements.plist \
-            --sign "$APPLE_DEVELOPER_ID" dist/AutoZoopla.app
+          # Sparkle's generate_appcast verifies the bundle's code signature. The
+          # app embeds pre-signed PySide6 helper apps, so an *unsigned* outer
+          # bundle fails validation (errSecCSResourceAdded). Sign it: with the
+          # Developer ID when available, otherwise ad-hoc so the seal is valid.
+          if [ -n "$APPLE_DEVELOPER_ID" ]; then
+            codesign --deep --force --options runtime \
+              --entitlements packaging/entitlements.plist \
+              --sign "$APPLE_DEVELOPER_ID" dist/AutoZoopla.app
+          else
+            echo "No APPLE_DEVELOPER_ID secret; applying an ad-hoc signature."
+            codesign --deep --force --sign - dist/AutoZoopla.app
+          fi
+          codesign --verify --verbose dist/AutoZoopla.app
 
       - name: Build DMG and PKG
         run: |
