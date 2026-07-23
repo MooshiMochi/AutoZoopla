@@ -22,17 +22,22 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from image_manager.image_manager_app import INSTRUCTIONS_FILENAME
 
+from ...providers.factory import provider_class_for
+from ...storage.credentials import CredentialStore
+from ...storage.property_images import PropertyImagesRepo
 from ..prompt_bridge import PromptBridge
 from ..relist_worker import RelistRequest, RelistWorker
 from ..services.images_validator import validate_images_directory
 from ..services.settings_service import SettingsService
 from ..theme import ChevronCombo, ModernCheckBox
+from ..widgets.credentials_dialog import CredentialsDialog
 from ..widgets.form_helpers import field_label, section_row
 from ..widgets.prompt_panel import PromptPanel
 from ..widgets.top_banner import TopBanner
@@ -71,6 +76,8 @@ class RelistPage(BasePage):
         settings: SettingsService,
         prompt_bridge: PromptBridge,
         log_handler: logging.Handler,
+        repo: PropertyImagesRepo | None = None,
+        credentials: CredentialStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -79,9 +86,12 @@ class RelistPage(BasePage):
         self._settings = settings
         self._prompt_bridge = prompt_bridge
         self._log_handler = log_handler
+        self._repo = repo
+        self._credentials = credentials
 
         self._thread: QThread | None = None
         self._worker: RelistWorker | None = None
+        self._active_request: RelistRequest | None = None
         self._running = False
         self._images_ready = True
 
@@ -150,16 +160,23 @@ class RelistPage(BasePage):
 
         self.source_combo = self._create_provider_combo()
         self.destination_combo = self._create_provider_combo()
+        self.source_gear = self._create_gear_button("source")
+        self.destination_gear = self._create_gear_button("destination")
         providers_grid = QGridLayout()
         providers_grid.setHorizontalSpacing(14)
         providers_grid.setVerticalSpacing(4)
         providers_grid.addWidget(field_label("Source provider"), 0, 0)
         providers_grid.addWidget(field_label("Destination provider"), 0, 1)
-        providers_grid.addWidget(self.source_combo, 1, 0)
-        providers_grid.addWidget(self.destination_combo, 1, 1)
+        providers_grid.addLayout(
+            self._provider_field(self.source_combo, self.source_gear), 1, 0
+        )
+        providers_grid.addLayout(
+            self._provider_field(self.destination_combo, self.destination_gear), 1, 1
+        )
         providers_grid.setColumnStretch(0, 1)
         providers_grid.setColumnStretch(1, 1)
         configuration_layout.addLayout(section_row("PROVIDERS", providers_grid))
+        self.source_combo.currentIndexChanged.connect(self._maybe_prefill_images)
 
         self.url_edit = QLineEdit()
         self.url_edit.setPlaceholderText(
@@ -167,6 +184,7 @@ class RelistPage(BasePage):
         )
         self.url_edit.setClearButtonEnabled(True)
         self.url_edit.textChanged.connect(self._update_start_state)
+        self.url_edit.textChanged.connect(self._maybe_prefill_images)
         listing_content = QVBoxLayout()
         listing_content.setContentsMargins(0, 0, 0, 0)
         listing_content.setSpacing(4)
@@ -331,6 +349,32 @@ class RelistPage(BasePage):
         index = combo.findData(value)
         if index >= 0:
             combo.setCurrentIndex(index)
+
+    def _create_gear_button(self, role: str) -> QToolButton:
+        gear = QToolButton()
+        gear.setObjectName("providerGear")
+        gear.setText("⚙")
+        gear.setToolTip(f"Edit {role} provider credentials")
+        gear.setAutoRaise(True)
+        gear.clicked.connect(lambda: self._edit_credentials(role))
+        return gear
+
+    @staticmethod
+    def _provider_field(combo: QComboBox, gear: QToolButton) -> QHBoxLayout:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.setSpacing(6)
+        row.addWidget(combo, 1)
+        row.addWidget(gear, 0)
+        return row
+
+    def _edit_credentials(self, role: str) -> None:
+        if self._credentials is None:
+            return
+        combo = self.source_combo if role == "source" else self.destination_combo
+        provider_key = str(combo.currentData())
+        dialog = CredentialsDialog(provider_key, role, self._credentials, self)
+        dialog.exec()
 
     # -------------------------------------------------------------- settings
 
@@ -508,6 +552,8 @@ class RelistPage(BasePage):
         self._log_handler.setLevel(level)
 
         self.save_settings()
+        self._save_images_mapping(request)
+        self._active_request = request
         self.append_log("-" * 88)
         logger.info(
             "Starting %s -> %s relist for %s",
@@ -546,7 +592,51 @@ class RelistPage(BasePage):
         self.cancel_button.setEnabled(False)
         self._worker.request_cancel()
 
+    def _maybe_prefill_images(self, *_: object) -> None:
+        if self._repo is None:
+            return
+        if self.images_edit.text().strip():
+            return
+        provider_class = provider_class_for(str(self.source_combo.currentData()))
+        if provider_class is None:
+            return
+        listing_id = provider_class.extract_listing_id(self.url_edit.text().strip())
+        if not listing_id:
+            return
+        saved = self._repo.get_images_dir(listing_id)
+        if saved:
+            self.images_edit.setText(saved)
+            self.status_label.setText("Loaded saved image folder for this listing.")
+
+    def _save_images_mapping(self, request: RelistRequest) -> None:
+        if self._repo is None or request.images_path is None:
+            return
+        provider_class = provider_class_for(request.source)
+        if provider_class is None:
+            return
+        listing_id = provider_class.extract_listing_id(request.listing_url)
+        if listing_id:
+            self._repo.set_images_dir(listing_id, str(request.images_path))
+
+    def _migrate_images_mapping(self, result: Any) -> None:
+        if self._repo is None or not result.published:
+            return
+        request = self._active_request
+        if request is None:
+            return
+        source_class = provider_class_for(request.source)
+        dest_class = provider_class_for(request.destination)
+        if source_class is None or dest_class is None:
+            return
+        old_id = source_class.extract_listing_id(request.listing_url)
+        new_id = result.destination_listing_id
+        if not new_id and result.destination_listing_url:
+            new_id = dest_class.extract_listing_id(result.destination_listing_url)
+        if old_id and new_id:
+            self._repo.migrate_id(old_id, new_id)
+
     def _on_success(self, result: Any) -> None:
+        self._migrate_images_mapping(result)
         listing = result.listing
         address = listing.address
         logger.info(

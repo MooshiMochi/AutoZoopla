@@ -24,6 +24,8 @@ from .pages.relist_page import RelistPage
 from .prompt_bridge import PromptBridge
 from .services.settings_service import SettingsService
 from .theme import build_stylesheet
+from ..storage.credentials import CredentialStore
+from ..storage.property_images import PropertyImagesRepo
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +54,14 @@ class MainWindow(QMainWindow):
         logging.getLogger().addHandler(self._log_handler)
 
         # Pages ------------------------------------------------------------
+        self._repo = PropertyImagesRepo()
+        self._credentials = CredentialStore()
         self.relist_page = RelistPage(
-            self._settings, self._prompt_bridge, self._log_handler
+            self._settings,
+            self._prompt_bridge,
+            self._log_handler,
+            repo=self._repo,
+            credentials=self._credentials,
         )
         self.image_page = ImagePage()
         self._organizer_return_to_relist = False
