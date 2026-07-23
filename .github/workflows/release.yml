@@ -34,6 +34,19 @@ jobs:
       - name: Build .app
         run: pyinstaller packaging/AutoZoopla.spec
 
+      - name: Prune unused Qt helper apps
+        run: |
+          # Assistant/Designer/Linguist are Qt dev tools we never use. Their
+          # nested .app bundles have symlinked executables that break codesign
+          # (and their pre-signed seals break Sparkle's appcast check).
+          PYSIDE="dist/AutoZoopla.app/Contents/Frameworks/PySide6"
+          for tool in Assistant Designer Linguist; do
+            rm -rf "$PYSIDE/${tool}.app" "$PYSIDE/${tool}__dot__app"
+          done
+          # Also drop any other stray nested app bundles under PySide6.
+          find "$PYSIDE" -maxdepth 1 \( -name '*.app' -o -name '*__dot__app' \) \
+            -exec rm -rf {} + 2>/dev/null || true
+
       - name: Read version
         id: version
         run: |
