@@ -10,18 +10,18 @@ permissions:
 
 jobs:
   build:
-    # GitHub no longer reliably provides Intel (macos-13) runners, so we build
-    # the x86_64 app on an Apple Silicon runner via Rosetta (x64 Python). arm64
-    # builds natively. Both run on macos-14.
+    # Native builds per architecture: Intel on macos-13, Apple Silicon on
+    # macos-14. Intel runners can queue for a long time; fail-fast: false lets
+    # arm64 finish independently.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86_64
-            py_arch: x64
-          # - arch: arm64
-          #   py_arch: arm64
-    runs-on: macos-14
+          - runner: macos-13   # Intel
+            arch: x86_64
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     env:
       APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -31,15 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rosetta (for x86_64 builds)
-        if: ${{ matrix.py_arch == 'x64' }}
-        run: softwareupdate --install-rosetta --agree-to-license
-
-      - name: Set up Python (${{ matrix.py_arch }})
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          architecture: ${{ matrix.py_arch }}
 
       - name: Install dependencies
         run: |
