@@ -189,6 +189,12 @@ QMenu::item { padding: 6px 24px 6px 12px; border-radius: 6px; color: #0f172a; }
 QMenu::item:selected { background: #eef2ff; color: #0f172a; }
 QMenu::separator { height: 1px; background: #eef1f7; margin: 4px 6px; }
 
+/* Menu bar (the slim top strip with Help). Kept low-profile. */
+QMenuBar { background: #ffffff; border-bottom: 1px solid #e6eaf2; padding: 0px 4px; }
+QMenuBar::item { padding: 2px 8px; margin: 1px 1px; background: transparent; color: #475569; border-radius: 6px; }
+QMenuBar::item:selected { background: #eef2ff; color: #0f172a; }
+QMenuBar::item:pressed { background: #e0e7ff; color: #0f172a; }
+
 /* Sidebar ------------------------------------------------------------------ */
 QFrame#sidebar { background: #0f172a; border: none; }
 QLabel#brandMark {

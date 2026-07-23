@@ -172,7 +172,9 @@ class MainWindow(QMainWindow):
         return sidebar
 
     def _build_menu(self) -> None:
-        help_menu = self.menuBar().addMenu("Help")
+        menubar = self.menuBar()
+        menubar.setMaximumHeight(26)
+        help_menu = menubar.addMenu("Help")
         self.check_updates_action = QAction("Check for Updates…", self)
         # On macOS this lands in the application menu next to About/Quit.
         self.check_updates_action.setMenuRole(

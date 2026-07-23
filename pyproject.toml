@@ -26,6 +26,9 @@ where = ["src"]
 
 [project.scripts]
 relister = "relister.cli:main"
+
+[project.gui-scripts]
+# GUI entry points build as windowed executables (no console window on Windows).
 autozoopla = "relister.gui.app:main"
 relister-gui = "relister.gui.app:main"
 imager = "image_manager.main:main"
