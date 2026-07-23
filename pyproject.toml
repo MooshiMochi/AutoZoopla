@@ -11,6 +11,10 @@ dependencies = [
     "keyring>=24",
 ]
 
+[project.optional-dependencies]
+macos = ["pyobjc-core>=10", "pyobjc-framework-Cocoa>=10"]
+build = ["pyinstaller>=6"]
+
 [project.scripts]
 relister = "relister.cli:main"
 autozoopla = "relister.gui.app:main"
