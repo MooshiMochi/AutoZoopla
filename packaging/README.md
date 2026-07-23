@@ -12,8 +12,9 @@ AutoZoopla ships as a macOS `.app` built with PyInstaller, distributed two ways:
 
 Artifacts are **arch-tagged**: `AutoZoopla-<v>-x86_64.{pkg,dmg}` (Intel) and
 `AutoZoopla-<v>-arm64.{pkg,dmg}` (Apple Silicon). Install the `.pkg` matching your
-Mac's chip. The release job produces one shared `appcast.xml`, and Sparkle serves each
-Mac the update DMG matching its architecture.
+Mac's chip. Each architecture has its own Sparkle feed (`appcast-x86_64.xml` /
+`appcast-arm64.xml`) because Sparkle can't serve two same-version archives from one feed;
+each build's `SUFeedURL` is set to its arch's appcast at build time.
 
 The release CI runs two build jobs (`macos-13` = Intel, `macos-14` = Apple Silicon) plus
 a release job. The project is developed on Windows, so these steps are authored but

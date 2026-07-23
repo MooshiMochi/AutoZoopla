@@ -68,6 +68,14 @@ jobs:
           V=$(python -c 'import runpy,os; print(runpy.run_path(os.path.join("src","relister","__version__.py"))["__version__"])')
           echo "version=$V" >> "$GITHUB_OUTPUT"
 
+      - name: Point app at its per-arch appcast
+        run: |
+          # Sparkle can't put two same-version archives in one appcast, so each
+          # architecture updates from its own feed. Must happen before codesign.
+          plutil -replace SUFeedURL -string \
+            "https://github.com/${{ github.repository }}/releases/latest/download/appcast-${{ matrix.arch }}.xml" \
+            dist/AutoZoopla.app/Contents/Info.plist
+
       - name: Codesign app
         run: |
           # Sparkle's generate_appcast verifies the bundle's code signature. The
@@ -140,14 +148,24 @@ jobs:
           tar -xf sparkle.tar.xz -C sparkle-tools
           echo "SPARKLE_BIN=$PWD/sparkle-tools/bin" >> "$GITHUB_ENV"
 
-      - name: Sign updates and generate appcast (Sparkle)
+      - name: Sign updates and generate per-arch appcasts (Sparkle)
         if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
         run: |
-          # generate_appcast signs every DMG in dist/ and writes a single
-          # appcast.xml; Sparkle serves each Mac the archive matching its arch.
+          # Sparkle rejects two same-version archives in one feed, so generate a
+          # separate appcast per architecture (each from a dir with only its DMG).
+          # Enclosure URLs stay relative -> resolved against the feed's
+          # releases/latest/download/ base, so they always point at the newest DMG.
           printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_private_key
-          "$SPARKLE_BIN/generate_appcast" --ed-key-file sparkle_private_key dist/
+          for arch in x86_64 arm64; do
+            dmg=$(ls dist/AutoZoopla-*-"$arch".dmg 2>/dev/null || true)
+            [ -n "$dmg" ] || { echo "No DMG for $arch; skipping."; continue; }
+            mkdir -p "feed-$arch"
+            cp "$dmg" "feed-$arch/"
+            "$SPARKLE_BIN/generate_appcast" --ed-key-file sparkle_private_key "feed-$arch/"
+            cp "feed-$arch/appcast.xml" "dist/appcast-$arch.xml"
+          done
           rm -f sparkle_private_key
+          ls -la dist/appcast-*.xml
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -155,4 +173,4 @@ jobs:
           files: |
             dist/AutoZoopla-*.dmg
             pkgs/AutoZoopla-*.pkg
-            dist/appcast.xml
+            dist/appcast-*.xml
