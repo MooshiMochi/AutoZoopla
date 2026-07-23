@@ -12,6 +12,13 @@ def main() -> int:
     app.setApplicationName("AutoZoopla")
     app.setOrganizationName("AutoZoopla")
 
+    try:
+        from relister.core.config import migrate_env_credentials
+
+        migrate_env_credentials()
+    except Exception:  # pragma: no cover - best-effort one-time migration
+        pass
+
     window = MainWindow()
     window.show()
 
