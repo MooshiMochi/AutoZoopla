@@ -10,16 +10,18 @@ permissions:
 
 jobs:
   build:
+    # GitHub no longer reliably provides Intel (macos-13) runners, so we build
+    # the x86_64 app on an Apple Silicon runner via Rosetta (x64 Python). arm64
+    # builds natively. Both run on macos-14.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-13   # Intel
-            arch: x86_64
-          # Apple Silicon temporarily disabled to isolate the Intel runner.
-          # - runner: macos-14   # Apple Silicon
-          #   arch: arm64
-    runs-on: ${{ matrix.runner }}
+          - arch: x86_64
+            py_arch: x64
+          # - arch: arm64
+          #   py_arch: arm64
+    runs-on: macos-14
     env:
       APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
@@ -29,10 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Install Rosetta (for x86_64 builds)
+        if: ${{ matrix.py_arch == 'x64' }}
+        run: softwareupdate --install-rosetta --agree-to-license
+
+      - name: Set up Python (${{ matrix.py_arch }})
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          architecture: ${{ matrix.py_arch }}
 
       - name: Install dependencies
         run: |
@@ -41,6 +48,12 @@ jobs:
 
       - name: Build .app
         run: pyinstaller packaging/AutoZoopla.spec
+
+      - name: Verify built architecture
+        run: |
+          echo "Python arch: $(python -c 'import platform; print(platform.machine())')"
+          lipo -archs dist/AutoZoopla.app/Contents/MacOS/AutoZoopla || \
+            file dist/AutoZoopla.app/Contents/MacOS/AutoZoopla
 
       - name: Prune unused Qt helper apps
         run: |
