@@ -10,13 +10,20 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-13   # Intel
+            arch: x86_64
+          - runner: macos-14   # Apple Silicon
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
     env:
       APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
       APPLE_ID: ${{ secrets.APPLE_ID }}
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +50,6 @@ jobs:
           for tool in Assistant Designer Linguist; do
             rm -rf "$PYSIDE/${tool}.app" "$PYSIDE/${tool}__dot__app"
           done
-          # Also drop any other stray nested app bundles under PySide6.
           find "$PYSIDE" -maxdepth 1 \( -name '*.app' -o -name '*__dot__app' \) \
             -exec rm -rf {} + 2>/dev/null || true
 
@@ -57,8 +63,8 @@ jobs:
         run: |
           # Sparkle's generate_appcast verifies the bundle's code signature. The
           # app embeds pre-signed PySide6 helper apps, so an *unsigned* outer
-          # bundle fails validation (errSecCSResourceAdded). Sign it: with the
-          # Developer ID when available, otherwise ad-hoc so the seal is valid.
+          # bundle fails validation. Sign it: Developer ID when available,
+          # otherwise ad-hoc so the seal is valid.
           if [ -n "$APPLE_DEVELOPER_ID" ]; then
             codesign --deep --force --options runtime \
               --entitlements packaging/entitlements.plist \
@@ -69,18 +75,50 @@ jobs:
           fi
           codesign --verify --verbose dist/AutoZoopla.app
 
-      - name: Build DMG and PKG
+      - name: Build DMG and PKG (arch-tagged)
         run: |
-          bash packaging/make_dmg.sh "${{ steps.version.outputs.version }}"
-          bash packaging/make_pkg.sh "${{ steps.version.outputs.version }}"
+          V="${{ steps.version.outputs.version }}"
+          A="${{ matrix.arch }}"
+          bash packaging/make_dmg.sh "$V"
+          bash packaging/make_pkg.sh "$V"
+          mv "dist/AutoZoopla-$V.dmg" "dist/AutoZoopla-$V-$A.dmg"
+          mv "dist/AutoZoopla-$V.pkg" "dist/AutoZoopla-$V-$A.pkg"
 
       - name: Notarize DMG
         if: ${{ env.APPLE_ID != '' }}
         run: |
-          xcrun notarytool submit "dist/AutoZoopla-${{ steps.version.outputs.version }}.dmg" \
+          DMG="dist/AutoZoopla-${{ steps.version.outputs.version }}-${{ matrix.arch }}.dmg"
+          xcrun notarytool submit "$DMG" \
             --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
             --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple "dist/AutoZoopla-${{ steps.version.outputs.version }}.dmg"
+          xcrun stapler staple "$DMG"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.arch }}
+          path: |
+            dist/AutoZoopla-*.dmg
+            dist/AutoZoopla-*.pkg
+
+  release:
+    needs: build
+    runs-on: macos-latest
+    env:
+      SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: incoming
+          merge-multiple: true
+
+      - name: Separate DMGs (for the appcast) from PKGs
+        run: |
+          mkdir -p dist pkgs
+          find incoming -name '*.dmg' -exec mv {} dist/ \;
+          find incoming -name '*.pkg' -exec mv {} pkgs/ \;
+          ls -la dist pkgs
 
       - name: Download Sparkle tools
         if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
@@ -93,11 +131,11 @@ jobs:
           tar -xf sparkle.tar.xz -C sparkle-tools
           echo "SPARKLE_BIN=$PWD/sparkle-tools/bin" >> "$GITHUB_ENV"
 
-      - name: Sign update and generate appcast (Sparkle)
+      - name: Sign updates and generate appcast (Sparkle)
         if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
         run: |
-          # generate_appcast writes the EdDSA signatures and produces/updates
-          # appcast.xml for everything in dist/.
+          # generate_appcast signs every DMG in dist/ and writes a single
+          # appcast.xml; Sparkle serves each Mac the archive matching its arch.
           printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_private_key
           "$SPARKLE_BIN/generate_appcast" --ed-key-file sparkle_private_key dist/
           rm -f sparkle_private_key
@@ -107,5 +145,5 @@ jobs:
         with:
           files: |
             dist/AutoZoopla-*.dmg
-            dist/AutoZoopla-*.pkg
+            pkgs/AutoZoopla-*.pkg
             dist/appcast.xml

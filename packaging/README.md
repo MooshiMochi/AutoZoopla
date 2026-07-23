@@ -10,8 +10,14 @@ AutoZoopla ships as a macOS `.app` built with PyInstaller, distributed two ways:
   **Install / Skip This Version / Remind Me Later**. Updates ship the app only; the
   browsers already on disk persist.
 
-Everything below runs on **macOS** (or the GitHub Actions `macos-latest` runner). The
-project is developed on Windows, so these steps are authored but verified only on macOS.
+Artifacts are **arch-tagged**: `AutoZoopla-<v>-x86_64.{pkg,dmg}` (Intel) and
+`AutoZoopla-<v>-arm64.{pkg,dmg}` (Apple Silicon). Install the `.pkg` matching your
+Mac's chip. The release job produces one shared `appcast.xml`, and Sparkle serves each
+Mac the update DMG matching its architecture.
+
+The release CI runs two build jobs (`macos-13` = Intel, `macos-14` = Apple Silicon) plus
+a release job. The project is developed on Windows, so these steps are authored but
+verified only on the macOS runners.
 
 ## One-time setup
 
