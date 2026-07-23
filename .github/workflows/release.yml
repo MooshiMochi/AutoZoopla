@@ -16,8 +16,9 @@ jobs:
         include:
           - runner: macos-13   # Intel
             arch: x86_64
-          - runner: macos-14   # Apple Silicon
-            arch: arm64
+          # Apple Silicon temporarily disabled to isolate the Intel runner.
+          # - runner: macos-14   # Apple Silicon
+          #   arch: arm64
     runs-on: ${{ matrix.runner }}
     env:
       APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
