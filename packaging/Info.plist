@@ -23,9 +23,9 @@
     <!-- Replace SUFeedURL with the release-hosted appcast, and SUPublicEDKey
          with the EdDSA public key printed by Sparkle's `generate_keys`. -->
     <key>SUFeedURL</key>
-    <string>https://github.com/OWNER/REPO/releases/latest/download/appcast.xml</string>
+    <string>https://github.com/MooshiMochi/AutoZoopla/releases/latest/download/appcast.xml</string>
     <key>SUPublicEDKey</key>
-    <string>REPLACE_WITH_SPARKLE_ED25519_PUBLIC_KEY</string>
+    <string>DrUPaOnMlieJvGLG3btWX2729EBRdnbcNVsWYncMjcU=</string>
     <key>SUEnableAutomaticChecks</key>
     <true/>
     <key>SUScheduledCheckInterval</key>
