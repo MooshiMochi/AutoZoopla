@@ -307,4 +307,6 @@ class ZooplaCreateListingPage:
 
     @staticmethod
     def extract_listing_id(url: str) -> str:
-        return url.rstrip("/").split("/")[-1].split("?")[0]
+        from relister.providers.zoopla.provider import ZooplaProvider
+
+        return ZooplaProvider.extract_listing_id(url) or ""

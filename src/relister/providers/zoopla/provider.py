@@ -7,17 +7,28 @@ from playwright.async_api import BrowserContext, Page, TimeoutError as PWTimeout
 from pydantic import HttpUrl
 
 from relister.domain.accounts import ProviderAccount
-from relister.domain.models import PropertyListing
+from relister.domain.models import LettingsListing, PropertyListing
 from relister.providers.base import PropertyProvider
+from relister.providers.zoopla.pages.listings_page import ZooplaManagedListingsPage
 from relister.providers.zoopla.pages.login_page import ZooplaLoginPage
 from relister.providers.zoopla.pages.listing_page import ZooplaListingPage
 from relister.providers.zoopla.pages.create_listing_page import (
     ZooplaCreateListingPage,
 )
+from relister.providers.zoopla.selectors import MANAGED_LISTINGS_URL
 
 
 class ZooplaProvider(PropertyProvider):
     name = "zoopla"
+
+    @staticmethod
+    def extract_listing_id(url: str) -> str | None:
+        # Zoopla listing URLs look like
+        # https://pro.zoopla.co.uk/properties/listing/5356300
+        url = str(url).split("?")[0].split("#")[0].rstrip("/")
+        if not url:
+            return None
+        return url.split("/")[-1] or None
 
     def __init__(self, username: str, password: str) -> None:
         self.account = ProviderAccount(
@@ -97,6 +108,17 @@ class ZooplaProvider(PropertyProvider):
         finally:
             if submit:
                 await page.close()
+
+    async def scrape_managed_listings(
+        self, context: BrowserContext
+    ) -> list[LettingsListing]:
+        page = await context.new_page()
+
+        try:
+            listing_page = ZooplaManagedListingsPage(page)
+            return await listing_page.scrape(MANAGED_LISTINGS_URL)
+        finally:
+            await page.close()
 
     async def listing_exists(
         self,

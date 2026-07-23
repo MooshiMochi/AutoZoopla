@@ -7,12 +7,25 @@ from playwright.async_api import BrowserContext, Page
 from pydantic.v1 import HttpUrl
 
 from relister.domain.accounts import ProviderAccount
-from relister.domain.models import PropertyListing
+from relister.domain.models import LettingsListing, PropertyListing
 
 
 class PropertyProvider(ABC):
     name: str
     account: ProviderAccount
+
+    @staticmethod
+    def extract_listing_id(url: str) -> str | None:
+        """Return the listing ID from a listing URL, or ``None``.
+
+        Default implementation takes the last path segment (minus any query
+        string); providers override for provider-specific URL shapes.
+        """
+
+        url = str(url).split("?")[0].split("#")[0].rstrip("/")
+        if not url:
+            return None
+        return url.split("/")[-1] or None
 
     @abstractmethod
     def is_login_url(self, url: str | HttpUrl) -> bool:
@@ -44,6 +57,13 @@ class PropertyProvider(ABC):
         context: BrowserContext,
         listing_url: str,
     ) -> PropertyListing:
+        pass
+
+    @abstractmethod
+    async def scrape_managed_listings(
+        self,
+        context: BrowserContext,
+    ) -> list[LettingsListing]:
         pass
 
     @abstractmethod

@@ -1,6 +1,7 @@
 LOGIN_URL = "https://pro.zoopla.co.uk/login/"
 CHECK_LOGIN_URL = "https://login.zoopla.co.uk/u/login"
 DASHBOARD_URL = "https://pro.zoopla.co.uk/portal/dashboard?viewId=195132"
+MANAGED_LISTINGS_URL = "https://pro.zoopla.co.uk/properties/browse/?listing_type=rent"
 
 CREATE_LISTING_URL = "https://pro.zoopla.co.uk/properties/listing/?category=residential&listing_type=rent&return_url=%2Fproperties%2Fbrowse%2F%3Flisting_type%3Drent"
 # CREATE_LISTING_URL = "file:///C:/Users/rchir/Downloads/ZooplaProCreateListing.html"
