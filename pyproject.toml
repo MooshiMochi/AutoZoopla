@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "property-relister"
-version = "0.1.0"
+dynamic = ["version"]
 requires-python = ">=3.11"
 dependencies = [
     "playwright>=1.40",
@@ -14,6 +18,12 @@ dependencies = [
 [project.optional-dependencies]
 macos = ["pyobjc-core>=10", "pyobjc-framework-Cocoa>=10"]
 build = ["pyinstaller>=6"]
+
+[tool.setuptools.dynamic]
+version = { attr = "relister.__version__.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project.scripts]
 relister = "relister.cli:main"

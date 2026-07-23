@@ -15,18 +15,22 @@ project is developed on Windows, so these steps are authored but verified only o
 
 ## One-time setup
 
-### 1. Sparkle tools + EdDSA keys
+### 1. Sparkle EdDSA keys (no local Mac needed)
 
-Download the Sparkle distribution and vendor its `bin/` tools at `tools/sparkle/bin`
-(`generate_keys`, `generate_appcast`, `sign_update`). Then:
+You do **not** vendor Sparkle's tools or create a `tools/` directory — the workflows
+download Sparkle automatically. To create your signing keypair, run the bootstrap
+workflow once:
 
-```bash
-./tools/sparkle/bin/generate_keys
-```
+1. GitHub → **Actions** → **Bootstrap Sparkle keys** → **Run workflow**.
+2. Open the finished run's **Summary**: copy the printed **public key** into
+   `packaging/Info.plist` under `SUPublicEDKey`.
+3. Download the run's **`sparkle-private-key`** artifact, paste its contents into a
+   repository secret named **`SPARKLE_PRIVATE_KEY`**, then delete the artifact.
 
-- The **private key** is stored in your login Keychain. Export it and add it to the repo
-  as the `SPARKLE_PRIVATE_KEY` GitHub Actions secret.
-- The printed **public key** goes into `packaging/Info.plist` under `SUPublicEDKey`.
+That keypair is permanent — generate it once and reuse it for every release. (If you do
+have a Mac, the equivalent is downloading a Sparkle release and running
+`bin/generate_keys` locally; the private key lands in your login Keychain and the public
+key is printed.)
 
 ### 2. Appcast URL
 
@@ -56,7 +60,8 @@ bash packaging/make_pkg.sh                     # -> dist/AutoZoopla-<v>.pkg
 
 ## Cutting a release
 
-1. Bump the version in `src/relister/__version__.py` (and `pyproject.toml` to match).
+1. Bump the version in `src/relister/__version__.py` (the only place — `pyproject.toml`
+   and `Info.plist` pick it up automatically).
 2. Update `SUPublicEDKey` / `SUFeedURL` in `Info.plist` if not already set.
 3. Tag and push: `git tag v0.1.0 && git push --tags`.
 4. `.github/workflows/release.yml` builds, (optionally) signs + notarizes, generates the
@@ -65,8 +70,11 @@ bash packaging/make_pkg.sh                     # -> dist/AutoZoopla-<v>.pkg
 
 ## Notes
 
-- The version lives in `src/relister/__version__.py`; the spec injects it into
-  `Info.plist` at build time.
+- The version lives in `src/relister/__version__.py` and is the single source of truth:
+  `pyproject.toml` reads it dynamically (`[tool.setuptools.dynamic]`) and the PyInstaller
+  spec injects it into `Info.plist` at build time. Bump it in one place.
+- The release workflow downloads Sparkle's binary tools during the run (pinned
+  `SPARKLE_VERSION`); nothing Sparkle-related is committed to the repo.
 - The `.pkg` postinstall path is duplicated as `_MACOS_BROWSER_CACHE` in
   `src/relister/gui/app.py` — keep the two in sync.
 - Hardened-runtime entitlements (`packaging/entitlements.plist`) allow PySide6's JIT and

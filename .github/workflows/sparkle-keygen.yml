@@ -1,0 +1,47 @@
+name: Bootstrap Sparkle keys
+
+# One-time, manually-triggered helper. Generates the Sparkle EdDSA signing
+# keypair on a macOS runner so you don't need a local Mac:
+#   1. Actions tab -> "Bootstrap Sparkle keys" -> Run workflow.
+#   2. Copy the public key from the run summary into packaging/Info.plist
+#      (SUPublicEDKey).
+#   3. Download the "sparkle-private-key" artifact, paste its contents into the
+#      SPARKLE_PRIVATE_KEY repository secret, then delete the artifact.
+on:
+  workflow_dispatch:
+
+jobs:
+  keygen:
+    runs-on: macos-latest
+    steps:
+      - name: Download Sparkle tools
+        env:
+          SPARKLE_VERSION: "2.6.4"
+        run: |
+          curl -fsSL -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p sparkle-tools
+          tar -xf sparkle.tar.xz -C sparkle-tools
+          echo "SPARKLE_BIN=$PWD/sparkle-tools/bin" >> "$GITHUB_ENV"
+
+      - name: Generate keypair
+        run: |
+          # Creates the private key in the runner keychain and prints the
+          # public key; then export the private key for one-time capture.
+          "$SPARKLE_BIN/generate_keys" | tee generate_keys_output.txt
+          "$SPARKLE_BIN/generate_keys" -x sparkle_private_key
+          {
+            echo "## Sparkle keys"
+            echo "Paste the public key into packaging/Info.plist under SUPublicEDKey,"
+            echo "and put the downloaded private key into the SPARKLE_PRIVATE_KEY secret."
+            echo '```'
+            cat generate_keys_output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload private key (delete after capturing)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sparkle-private-key
+          path: sparkle_private_key
+          retention-days: 1

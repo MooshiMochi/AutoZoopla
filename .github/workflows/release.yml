@@ -60,14 +60,24 @@ jobs:
             --password "$APPLE_APP_PASSWORD" --wait
           xcrun stapler staple "dist/AutoZoopla-${{ steps.version.outputs.version }}.dmg"
 
+      - name: Download Sparkle tools
+        if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
+        env:
+          SPARKLE_VERSION: "2.6.4"
+        run: |
+          curl -fsSL -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p sparkle-tools
+          tar -xf sparkle.tar.xz -C sparkle-tools
+          echo "SPARKLE_BIN=$PWD/sparkle-tools/bin" >> "$GITHUB_ENV"
+
       - name: Sign update and generate appcast (Sparkle)
         if: ${{ env.SPARKLE_PRIVATE_KEY != '' }}
         run: |
-          # Sparkle's binary tools are vendored under tools/sparkle/bin (see
-          # packaging/README.md). generate_appcast writes the EdDSA signatures
-          # and produces/updates appcast.xml for the dist folder.
+          # generate_appcast writes the EdDSA signatures and produces/updates
+          # appcast.xml for everything in dist/.
           printf '%s' "$SPARKLE_PRIVATE_KEY" > sparkle_private_key
-          ./tools/sparkle/bin/generate_appcast --ed-key-file sparkle_private_key dist/
+          "$SPARKLE_BIN/generate_appcast" --ed-key-file sparkle_private_key dist/
           rm -f sparkle_private_key
 
       - name: Publish GitHub Release

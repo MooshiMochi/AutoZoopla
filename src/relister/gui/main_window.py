@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -24,6 +24,7 @@ from .pages.relist_page import RelistPage
 from .prompt_bridge import PromptBridge
 from .services.settings_service import SettingsService
 from .theme import build_stylesheet
+from .updater import SparkleUpdater
 from ..storage.credentials import CredentialStore
 from ..storage.property_images import PropertyImagesRepo
 
@@ -72,12 +73,20 @@ class MainWindow(QMainWindow):
         )
 
         self._build_ui()
+        self._build_menu()
         self._wire_pages()
 
         self._log_emitter.message_emitted.connect(self.relist_page.append_log)
 
         self._restore_geometry()
         self._switch_to_index(0)
+
+        # Auto-updater: real on macOS, safe no-op elsewhere.
+        self._updater = SparkleUpdater()
+        try:
+            self._updater.start()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Updater failed to start.")
 
     # ------------------------------------------------------------------ build
 
@@ -157,6 +166,26 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.sidebar_hint)
 
         return sidebar
+
+    def _build_menu(self) -> None:
+        help_menu = self.menuBar().addMenu("Help")
+        self.check_updates_action = QAction("Check for Updates…", self)
+        # On macOS this lands in the application menu next to About/Quit.
+        self.check_updates_action.setMenuRole(
+            QAction.MenuRole.ApplicationSpecificRole
+        )
+        self.check_updates_action.triggered.connect(self._check_for_updates)
+        help_menu.addAction(self.check_updates_action)
+
+    def _check_for_updates(self) -> None:
+        if not self._updater.available:
+            QMessageBox.information(
+                self,
+                "Check for Updates",
+                "Automatic updates are only available in the packaged macOS app.",
+            )
+            return
+        self._updater.check_for_updates()
 
     def _wire_pages(self) -> None:
         self.relist_page.request_organiser.connect(self._open_organiser_from_relist)

@@ -29,7 +29,6 @@ _pin_browser_cache_path()
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 from .main_window import MainWindow  # noqa: E402
-from .updater import SparkleUpdater  # noqa: E402
 
 
 def main() -> int:
@@ -46,13 +45,6 @@ def main() -> int:
 
     window = MainWindow()
     window.show()
-
-    # Keep a reference on the window so the updater is not garbage-collected.
-    window._updater = SparkleUpdater()
-    try:
-        window._updater.start()
-    except Exception:  # pragma: no cover - defensive
-        pass
 
     return app.exec()
 
