@@ -1,5 +1,9 @@
 # src/relister/browser/session.py
 
+from __future__ import annotations
+
+import json
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -7,7 +11,48 @@ from pathlib import Path
 from playwright.async_api import BrowserContext, async_playwright
 
 from relister.browser.login_guard import ContextLoginGuard
+from relister.core import paths
+from relister.core.security import get_cipher, hash_name
 from relister.providers.base import PropertyProvider
+
+logger = logging.getLogger(__name__)
+
+
+def session_filename(provider_name: str, alias: str) -> str:
+    """Opaque, non-correlatable filename for a provider account's session."""
+
+    return hash_name(provider_name, alias) + ".enc"
+
+
+def save_state(path: Path, state: dict) -> None:
+    """Encrypt and write a Playwright storage-state dict to ``path``."""
+
+    blob = get_cipher().encrypt(json.dumps(state).encode("utf-8"))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(blob)
+
+
+def load_state(path: Path) -> dict | None:
+    """Decrypt a stored session; ``None`` if missing or undecryptable."""
+
+    if not path.exists():
+        return None
+    try:
+        raw = get_cipher().decrypt(path.read_bytes())
+    except Exception:
+        logger.warning("Stored session could not be decrypted; ignoring it.")
+        return None
+    return json.loads(raw.decode("utf-8"))
+
+
+async def _launch_browser(playwright, *, headless: bool):
+    """Launch Firefox if available, otherwise fall back to WebKit."""
+
+    try:
+        return await playwright.firefox.launch(headless=headless)
+    except Exception as exc:
+        logger.warning("Firefox unavailable (%s); falling back to WebKit.", exc)
+        return await playwright.webkit.launch(headless=headless)
 
 
 class BrowserSession:
@@ -21,39 +66,24 @@ class BrowserSession:
         self.headless = headless
         self.login_gate: ContextLoginGuard | None = None
 
-        session_name = f"{provider.name}-{provider.account.alias}.json"
-
-        self.state_path = Path("data/browser_states") / session_name
+        filename = session_filename(provider.name, provider.account.alias)
+        self.state_path = paths.browser_states_dir() / filename
 
     async def _save_session_state(self, context: BrowserContext) -> None:
-        if not self.state_path.parent.exists():
-            self.state_path.parent.mkdir(
-                parents=True,
-                exist_ok=True,
-            )
-
-        await context.storage_state(
-            path=str(self.state_path),
-        )
+        state = await context.storage_state()
+        save_state(self.state_path, state)
 
     @asynccontextmanager
     async def authenticated_context(
         self,
     ) -> AsyncIterator[BrowserContext]:
-        self.state_path.parent.mkdir(
-            parents=True,
-            exist_ok=True,
-        )
-
         async with async_playwright() as playwright:
-            browser = await playwright.firefox.launch(
-                headless=self.headless,
-            )
+            browser = await _launch_browser(playwright, headless=self.headless)
 
             context_options = {}
-
-            if self.state_path.exists():
-                context_options["storage_state"] = str(self.state_path)
+            stored_state = load_state(self.state_path)
+            if stored_state is not None:
+                context_options["storage_state"] = stored_state
 
             context = await browser.new_context(
                 **context_options,
