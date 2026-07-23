@@ -43,9 +43,12 @@ class ZooplaLoginPage:
 
     async def _handle_branch_selection_if_needed(self) -> None:
         # Check if the branch selection prompt is present
+        from relister.storage.app_settings import AppSettings
+
+        branch_id = AppSettings().get("zoopla_branch_id") or selectors.BRANCH_ID
         try:
             await self.page.locator(selectors.BRANCH_SELECTOR).select_option(
-                value=selectors.BRANCH_ID, timeout=2_000  # 2 seconds
+                value=branch_id, timeout=2_000  # 2 seconds
             )
         except PWTimeoutError:
             logger.debug("No branch selection prompt detected.")

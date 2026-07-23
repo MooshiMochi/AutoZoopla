@@ -21,10 +21,12 @@ from .logging_handler import LogEmitter, QtLogHandler
 from .navigation import NavItem
 from .pages.image_page import ImagePage
 from .pages.relist_page import RelistPage
+from .pages.settings_page import SettingsPage
 from .prompt_bridge import PromptBridge
 from .services.settings_service import SettingsService
 from .theme import build_stylesheet
 from .updater import SparkleUpdater
+from ..storage.app_settings import AppSettings
 from ..storage.credentials import CredentialStore
 from ..storage.property_images import PropertyImagesRepo
 
@@ -57,19 +59,21 @@ class MainWindow(QMainWindow):
         # Pages ------------------------------------------------------------
         self._repo = PropertyImagesRepo()
         self._credentials = CredentialStore()
+        self._app_settings = AppSettings()
         self.relist_page = RelistPage(
             self._settings,
             self._prompt_bridge,
             self._log_handler,
             repo=self._repo,
-            credentials=self._credentials,
         )
         self.image_page = ImagePage()
+        self.settings_page = SettingsPage(self._credentials, self._app_settings)
         self._organizer_return_to_relist = False
 
         self._nav_items = (
             NavItem("relist", self.relist_page.nav_label, lambda: self.relist_page),
             NavItem("images", self.image_page.nav_label, lambda: self.image_page),
+            NavItem("settings", self.settings_page.nav_label, lambda: self.settings_page),
         )
 
         self._build_ui()

@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
-    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -30,14 +29,12 @@ from PySide6.QtWidgets import (
 from image_manager.image_manager_app import INSTRUCTIONS_FILENAME
 
 from ...providers.factory import provider_class_for
-from ...storage.credentials import CredentialStore
 from ...storage.property_images import PropertyImagesRepo
 from ..prompt_bridge import PromptBridge
 from ..relist_worker import RelistRequest, RelistWorker
 from ..services.images_validator import validate_images_directory
 from ..services.settings_service import SettingsService
 from ..theme import ChevronCombo, ModernCheckBox
-from ..widgets.credentials_dialog import CredentialsDialog
 from ..widgets.form_helpers import field_label, section_row
 from ..widgets.prompt_panel import PromptPanel
 from ..widgets.top_banner import TopBanner
@@ -77,7 +74,6 @@ class RelistPage(BasePage):
         prompt_bridge: PromptBridge,
         log_handler: logging.Handler,
         repo: PropertyImagesRepo | None = None,
-        credentials: CredentialStore | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -87,7 +83,6 @@ class RelistPage(BasePage):
         self._prompt_bridge = prompt_bridge
         self._log_handler = log_handler
         self._repo = repo
-        self._credentials = credentials
 
         self._thread: QThread | None = None
         self._worker: RelistWorker | None = None
@@ -160,19 +155,13 @@ class RelistPage(BasePage):
 
         self.source_combo = self._create_provider_combo()
         self.destination_combo = self._create_provider_combo()
-        self.source_gear = self._create_gear_button("source")
-        self.destination_gear = self._create_gear_button("destination")
         providers_grid = QGridLayout()
         providers_grid.setHorizontalSpacing(14)
         providers_grid.setVerticalSpacing(4)
         providers_grid.addWidget(field_label("Source provider"), 0, 0)
         providers_grid.addWidget(field_label("Destination provider"), 0, 1)
-        providers_grid.addLayout(
-            self._provider_field(self.source_combo, self.source_gear), 1, 0
-        )
-        providers_grid.addLayout(
-            self._provider_field(self.destination_combo, self.destination_gear), 1, 1
-        )
+        providers_grid.addWidget(self.source_combo, 1, 0)
+        providers_grid.addWidget(self.destination_combo, 1, 1)
         providers_grid.setColumnStretch(0, 1)
         providers_grid.setColumnStretch(1, 1)
         configuration_layout.addLayout(section_row("PROVIDERS", providers_grid))
@@ -349,32 +338,6 @@ class RelistPage(BasePage):
         index = combo.findData(value)
         if index >= 0:
             combo.setCurrentIndex(index)
-
-    def _create_gear_button(self, role: str) -> QToolButton:
-        gear = QToolButton()
-        gear.setObjectName("providerGear")
-        gear.setText("⚙")
-        gear.setToolTip(f"Edit {role} provider credentials")
-        gear.setAutoRaise(True)
-        gear.clicked.connect(lambda: self._edit_credentials(role))
-        return gear
-
-    @staticmethod
-    def _provider_field(combo: QComboBox, gear: QToolButton) -> QHBoxLayout:
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
-        row.addWidget(combo, 1)
-        row.addWidget(gear, 0)
-        return row
-
-    def _edit_credentials(self, role: str) -> None:
-        if self._credentials is None:
-            return
-        combo = self.source_combo if role == "source" else self.destination_combo
-        provider_key = str(combo.currentData())
-        dialog = CredentialsDialog(provider_key, role, self._credentials, self)
-        dialog.exec()
 
     # -------------------------------------------------------------- settings
 
