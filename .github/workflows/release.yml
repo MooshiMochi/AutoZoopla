@@ -162,7 +162,9 @@ jobs:
             mkdir -p "feed-$arch"
             cp "$dmg" "feed-$arch/"
             "$SPARKLE_BIN/generate_appcast" --ed-key-file sparkle_private_key "feed-$arch/"
-            cp "feed-$arch/appcast.xml" "dist/appcast-$arch.xml"
+            # generate_appcast names the file after the app's SUFeedURL basename
+            # (e.g. appcast-x86_64.xml), so copy whatever appcast it produced.
+            cp feed-$arch/appcast*.xml "dist/appcast-$arch.xml"
           done
           rm -f sparkle_private_key
           ls -la dist/appcast-*.xml
