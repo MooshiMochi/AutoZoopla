@@ -28,7 +28,10 @@ _pin_browser_cache_path()
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from .main_window import MainWindow  # noqa: E402
+# Absolute import: PyInstaller runs this file as __main__ (no package context),
+# so a relative import would fail in the frozen app. Absolute works in both the
+# frozen entry and the console-script (imported as relister.gui.app).
+from relister.gui.main_window import MainWindow  # noqa: E402
 
 
 def main() -> int:
