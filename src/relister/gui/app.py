@@ -31,12 +31,33 @@ def _pin_browser_cache_path() -> None:
 _pin_browser_cache_path()
 
 from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QIcon  # noqa: E402
 from PySide6.QtWidgets import QApplication, QProgressDialog  # noqa: E402
 
 # Absolute import: PyInstaller runs this file as __main__ (no package context),
 # so a relative import would fail in the frozen app. Absolute works in both the
 # frozen entry and the console-script (imported as relister.gui.app).
 from relister.gui.main_window import MainWindow  # noqa: E402
+
+
+def _app_icon_path() -> str | None:
+    """Locate the bundled app icon (PNG) in both frozen and dev layouts."""
+
+    from pathlib import Path
+
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", None)
+        if base:
+            candidates.append(Path(base) / "icons" / "AutoZoopla.png")
+    # Development: repo-root/packaging/icons.
+    here = Path(__file__).resolve()
+    candidates.append(here.parents[3] / "packaging" / "icons" / "AutoZoopla.png")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
 
 
 def _browsers_present() -> bool:
@@ -133,6 +154,10 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("AutoZoopla")
     app.setOrganizationName("AutoZoopla")
+
+    icon_path = _app_icon_path()
+    if icon_path:
+        app.setWindowIcon(QIcon(icon_path))
 
     try:
         from relister.core.config import migrate_env_credentials

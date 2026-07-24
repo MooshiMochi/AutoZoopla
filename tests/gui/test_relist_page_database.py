@@ -59,3 +59,30 @@ def test_unknown_listing_leaves_images_empty(qapp, tmp_path):
     page.url_edit.setText("https://pro.zoopla.co.uk/properties/listing/999")
 
     assert page.images_edit.text() == ""
+
+
+def test_clearing_url_clears_images(qapp, tmp_path):
+    repo = PropertyImagesRepo(tmp_path / "db.sqlite")
+    repo.set_images_dir("5356300", str(tmp_path / "imgs"))
+    page = _page(tmp_path, repo=repo)
+
+    page.url_edit.setText("https://pro.zoopla.co.uk/properties/listing/5356300")
+    assert page.images_edit.text() == str(tmp_path / "imgs")
+
+    page.url_edit.clear()
+
+    assert page.images_edit.text() == ""
+
+
+def test_prefill_normalizes_saved_path(qapp, tmp_path):
+    # A path persisted with redundant separators / trailing slash must still be
+    # loaded in a form that validates (bug: warned "folder doesn't exist").
+    target = tmp_path / "imgs"
+    messy = str(tmp_path) + "//imgs/"
+    repo = PropertyImagesRepo(tmp_path / "db.sqlite")
+    repo.set_images_dir("5356300", messy)
+    page = _page(tmp_path, repo=repo)
+
+    page.url_edit.setText("https://pro.zoopla.co.uk/properties/listing/5356300")
+
+    assert page.images_edit.text() == str(target)

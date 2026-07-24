@@ -1,5 +1,24 @@
 # Combined desktop app changes
 
+## 0.1.1a — bug-fix pass
+
+- **Browser no longer leaks between runs.** Cancelling a relist now always tears the
+  browser context and browser down (even if the cancellation lands mid-teardown), and
+  the login guard stops listening and cancels its tasks on close.
+- **Doubled listing fields are auto-corrected.** After filling the create-listing form,
+  the filled text fields (address + rent) are read back and re-filled until they match
+  the source listing, fixing occasional doubling such as `ChurchillChurchill` before the
+  listing is saved.
+- **Dry run pauses in the app, not the browser inspector.** Instead of `page.pause()`
+  (which opens the slow Chromium dev console on macOS), a dry run now waits for you to
+  press Enter in the app's input panel.
+- **Clearing the listing URL clears the image folder** too.
+- **Saved image folders load reliably.** A stored path is normalised (whitespace, `~`,
+  redundant separators) on load so it no longer spuriously warns that the folder is
+  missing.
+- **App icon.** Added an "AZ" monogram icon for the macOS bundle, Dock and window/taskbar.
+- Window title and sidebar now show the version (`v0.1.1a`).
+
 ## Unified application
 
 - Embedded the image ordering UI as `ImageOrderPage` inside the relister application.

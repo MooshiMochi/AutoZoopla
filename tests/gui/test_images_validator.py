@@ -63,3 +63,16 @@ def test_valid_folder_is_success(tmp_path):
     assert result.state == "success"
     assert result.ready is True
     assert "1 image " in result.message
+
+
+def test_home_relative_path_is_expanded(tmp_path, monkeypatch):
+    # A path stored as "~/pics" must resolve rather than read as non-existent.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))  # Windows expanduser source
+    _img(tmp_path / "a.png")
+    (tmp_path / INSTRUCTIONS_FILENAME).write_text("a.png\n", encoding="utf-8")
+
+    result = validate_images_directory("~")
+
+    assert result.state == "success"
+    assert result.ready is True

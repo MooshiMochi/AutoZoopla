@@ -40,7 +40,9 @@ def validate_images_directory(images_text: str) -> ValidationResult:
             True,
         )
 
-    images_path = Path(images_text)
+    # Expand ``~`` so a home-relative path persisted by an older build still
+    # resolves, rather than being reported as a non-existent folder.
+    images_path = Path(images_text).expanduser()
     if not images_path.is_dir():
         return ValidationResult(
             "error",

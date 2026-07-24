@@ -32,11 +32,16 @@ with open(os.path.join(_here, "Info.plist"), "rb") as _plist_file:
 _info_plist["CFBundleShortVersionString"] = _version
 _info_plist["CFBundleVersion"] = _version
 
+# App icon: .icns drives the macOS .app / Dock; the .png is bundled so the Qt
+# runtime can set a matching window/taskbar icon (see gui/app.py).
+_icon_icns = os.path.join(_here, "icons", "AutoZoopla.icns")
+_icon_datas = [(os.path.join(_here, "icons", "AutoZoopla.png"), "icons")]
+
 a = Analysis(
     [os.path.join(_root, "src", "relister", "gui", "app.py")],
     pathex=[os.path.join(_root, "src")],
     binaries=_pyside_binaries + _nacl_binaries + _cffi_binaries,
-    datas=_pyside_datas + _nacl_datas + _cffi_datas,
+    datas=_pyside_datas + _nacl_datas + _cffi_datas + _icon_datas,
     hiddenimports=(
         _pyside_hidden
         + _playwright_hidden
@@ -65,6 +70,7 @@ exe = EXE(
     console=False,
     target_arch=None,
     entitlements_file=os.path.join(_here, "entitlements.plist"),
+    icon=_icon_icns,
 )
 
 coll = COLLECT(
@@ -79,7 +85,7 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name="AutoZoopla.app",
-    icon=None,
+    icon=_icon_icns,
     bundle_identifier="co.uk.rsestateagents.autozoopla",
     version=_version,
     info_plist=_info_plist,

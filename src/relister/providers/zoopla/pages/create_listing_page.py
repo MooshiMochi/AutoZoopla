@@ -94,6 +94,66 @@ class ZooplaCreateListingPage:
             await self._save_filled_screenshot()
             return True
 
+    async def _verify_and_correct_details(
+        self, listing: PropertyListing, *, max_passes: int = 3
+    ) -> None:
+        """Re-read filled text inputs and re-fill any that don't match.
+
+        Some fields (most often in the address section) occasionally end up
+        doubled — e.g. the street name showing ``ChurchillChurchill`` — or get
+        overwritten by the site's own postcode auto-fill. ``fill`` clears the
+        field first, so re-filling replaces the bad value rather than appending
+        to it. Bounded by ``max_passes`` so a genuinely rejected value can't
+        loop forever.
+        """
+
+        expected: list[tuple[str, str]] = [
+            (selectors.LISTING_ADDR_POSTCODE, listing.address.postcode or ""),
+            (
+                selectors.LISTING_ADDR_PROPERTY_NUMBER,
+                listing.address.house_number or "",
+            ),
+            (selectors.LISTING_ADDR_STREET_NAME, listing.address.street_name or ""),
+            (selectors.LISTING_ADDR_TOWN, listing.address.town or ""),
+            (selectors.LISTING_PRICE_RENT, str(listing.rent_pcm)),
+        ]
+
+        # Give any postcode-driven auto-fill on the site a moment to settle
+        # before reading the fields back.
+        await asyncio.sleep(1)
+
+        for _pass in range(max_passes):
+            mismatches: list[tuple[Locator, str, str, str]] = []
+            for selector, want in expected:
+                locator = self.page.locator(selector)
+                try:
+                    actual = await locator.input_value()
+                except Exception:
+                    logger.debug("Could not read field %s for verification.", selector)
+                    continue
+                if actual.strip() != want.strip():
+                    mismatches.append((locator, selector, want, actual))
+
+            if not mismatches:
+                logger.info("Listing details verified against the source listing.")
+                return
+
+            for locator, selector, want, actual in mismatches:
+                logger.warning(
+                    "Field %s was %r, expected %r; correcting.",
+                    selector,
+                    actual,
+                    want,
+                )
+                await locator.fill(want)
+            await asyncio.sleep(0.3)
+
+        logger.warning(
+            "Some listing fields still did not match after %d correction passes; "
+            "please review the form.",
+            max_passes,
+        )
+
     async def _save_filled_screenshot(self) -> None:
         """Best-effort debug screenshot to a writable app-data location.
 
@@ -120,11 +180,21 @@ class ZooplaCreateListingPage:
         await self._open_create_listing_page()
         await self.fill_listing_details(listing, images_path)
 
+        # Verify the filled details against the listing and correct any that
+        # drifted (e.g. a doubled street name) before saving.
+        await self._verify_and_correct_details(listing)
+
         await self._save_filled_screenshot()
 
         if not submit:
             logger.info("Dry run complete. The form has been filled but not submitted.")
-            await self.page.pause()
+            # Avoid page.pause(): on macOS it launches the slow Chromium
+            # inspector. Pause in the app instead and wait for the user.
+            await asyncio.to_thread(
+                input,
+                "Dry run: the form is filled but not submitted. Review the "
+                "browser, then press Enter in the app to finish.",
+            )
             return None
 
         for attempt in range(2):

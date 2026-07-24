@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -100,8 +101,31 @@ class BrowserSession:
             try:
                 yield context
             finally:
-                if self.login_gate:
-                    await self.login_gate.close()
+                await self._teardown(context, browser)
 
-                await context.close()
-                await browser.close()
+    async def _teardown(self, context: BrowserContext, browser) -> None:
+        """Close the guard, context and browser, always reaching the browser.
+
+        On cancellation the CancelledError is delivered at whichever ``close``
+        is awaiting. Catching it per-step (and re-raising afterwards) means a
+        cancel mid-teardown can't skip ``browser.close()`` and leak the
+        Firefox/WebKit process into the next relist run.
+        """
+
+        cancelled: BaseException | None = None
+        closers = []
+        if self.login_gate is not None:
+            closers.append(("login guard", self.login_gate.close))
+        closers.append(("browser context", context.close))
+        closers.append(("browser", browser.close))
+
+        for label, closer in closers:
+            try:
+                await closer()
+            except asyncio.CancelledError as exc:  # keep tearing down, re-raise later
+                cancelled = exc
+            except Exception:
+                logger.debug("Error closing %s during teardown.", label, exc_info=True)
+
+        if cancelled is not None:
+            raise cancelled

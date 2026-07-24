@@ -47,8 +47,17 @@ class ContextLoginGuard:
         self.ctx.on("framenavigated", self._on_frame_navigated)
 
     async def close(self):
-        logger.debug("Closing ContextLoginGuard and cancelling cookie prompt tasks.")
+        logger.debug("Closing ContextLoginGuard and cancelling its tasks.")
+        # Stop reacting to navigation so closing pages don't spawn new watchers.
+        try:
+            self.ctx.remove_listener("framenavigated", self._on_frame_navigated)
+        except Exception:
+            logger.debug("Could not detach framenavigated listener.", exc_info=True)
+
         tasks = [task for task in self._cookie_prompt_tasks.values() if not task.done()]
+        if self._login_task is not None and not self._login_task.done():
+            tasks.append(self._login_task)
+
         for task in tasks:
             task.cancel()
 
@@ -56,6 +65,7 @@ class ContextLoginGuard:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         self._cookie_prompt_tasks.clear()
+        self._login_task = None
 
     def _start_cookie_watcher(self, page: Page) -> None:
         existing_task = self._cookie_prompt_tasks.get(page)

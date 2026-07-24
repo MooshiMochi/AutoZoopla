@@ -174,6 +174,7 @@ class RelistPage(BasePage):
         self.url_edit.setClearButtonEnabled(True)
         self.url_edit.textChanged.connect(self._update_start_state)
         self.url_edit.textChanged.connect(self._maybe_prefill_images)
+        self.url_edit.textChanged.connect(self._clear_images_when_url_empty)
         listing_content = QVBoxLayout()
         listing_content.setContentsMargins(0, 0, 0, 0)
         listing_content.setSpacing(4)
@@ -561,6 +562,11 @@ class RelistPage(BasePage):
         self.cancel_button.setEnabled(False)
         self._worker.request_cancel()
 
+    def _clear_images_when_url_empty(self, text: str) -> None:
+        """Clearing the listing URL also clears the (auto-loaded) image folder."""
+        if not text.strip() and self.images_edit.text().strip():
+            self.images_edit.clear()
+
     def _maybe_prefill_images(self, *_: object) -> None:
         if self._repo is None:
             return
@@ -574,8 +580,23 @@ class RelistPage(BasePage):
             return
         saved = self._repo.get_images_dir(listing_id)
         if saved:
-            self.images_edit.setText(saved)
+            self.images_edit.setText(self._normalize_dir(saved))
             self.status_label.setText("Loaded saved image folder for this listing.")
+
+    @staticmethod
+    def _normalize_dir(path_text: str) -> str:
+        """Canonicalise a stored folder path so it validates reliably.
+
+        Strips stray whitespace, expands ``~`` and collapses redundant
+        separators (``//``, trailing slashes, ``..``). A path persisted by an
+        older build could carry any of these and then fail the ``is_dir`` check.
+        """
+        import os
+
+        cleaned = path_text.strip()
+        if not cleaned:
+            return ""
+        return os.path.normpath(os.path.expanduser(cleaned))
 
     def _save_images_mapping(self, request: RelistRequest) -> None:
         if self._repo is None or request.images_path is None:
