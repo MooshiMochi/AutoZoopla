@@ -113,6 +113,8 @@ jobs:
           # This catches import/bundling crashes AND non-fatal startup errors
           # (like the Sparkle framework load failure).
           export QT_QPA_PLATFORM=offscreen
+          # Don't trigger the first-launch browser download during the smoke.
+          export AUTOZOOPLA_SKIP_BROWSER_SETUP=1
           LOG=smoke.log
           "dist/AutoZoopla.app/Contents/MacOS/AutoZoopla" >"$LOG" 2>&1 &
           PID=$!
