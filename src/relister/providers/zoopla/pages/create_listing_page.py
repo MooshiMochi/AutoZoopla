@@ -91,11 +91,24 @@ class ZooplaCreateListingPage:
 
             await self.fill_listing_details(listing)
 
-            await self.page.screenshot(
-                path="data/screenshots/filled-listing.png",
-                full_page=True,
-            )
+            await self._save_filled_screenshot()
             return True
+
+    async def _save_filled_screenshot(self) -> None:
+        """Best-effort debug screenshot to a writable app-data location.
+
+        Never aborts the relist: a hardcoded relative path (``data/...``) would
+        resolve under a read-only ``/`` when the app is launched from Finder.
+        """
+
+        try:
+            from relister.core import paths
+
+            target = paths.data_dir() / "screenshots" / "filled-listing.png"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            await self.page.screenshot(path=str(target), full_page=True)
+        except Exception as exc:
+            logger.warning("Could not save the debug screenshot: %s", exc)
 
     async def create(
         self,
@@ -107,10 +120,7 @@ class ZooplaCreateListingPage:
         await self._open_create_listing_page()
         await self.fill_listing_details(listing, images_path)
 
-        await self.page.screenshot(
-            path="data/screenshots/filled-listing.png",
-            full_page=True,
-        )
+        await self._save_filled_screenshot()
 
         if not submit:
             logger.info("Dry run complete. The form has been filled but not submitted.")
