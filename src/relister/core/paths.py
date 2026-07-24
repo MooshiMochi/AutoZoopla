@@ -1,50 +1,45 @@
 from __future__ import annotations
 
 import os
-import sys
 from pathlib import Path
+
+import platformdirs
 
 APP_NAME = "AutoZoopla"
 
 
-def _user_home() -> Path:
-    """The real home directory of the current user.
+def _ensure_home() -> None:
+    """Repair a missing or degenerate ``$HOME`` before resolving paths.
 
-    A GUI app launched from Finder/launchd can inherit a missing or ``/`` value
-    for ``$HOME``; that would place the app-data dir under the root-owned
-    system ``/Library`` and make the database read-only. Fall back to the passwd
-    database so we always resolve the actual user home.
+    A GUI app launched from Finder/launchd can inherit an empty or ``/`` value
+    for ``$HOME``. platformdirs (like ``os.path.expanduser``) trusts ``$HOME``,
+    so that would place the app-data dir under the root-owned system location
+    and make the database read-only. Fall back to the passwd database to get the
+    real per-user home.
     """
 
+    if os.name == "nt":
+        return
     home = os.environ.get("HOME")
-    if home and home not in ("", "/"):
-        return Path(home)
-    if os.name != "nt":
-        try:
-            import pwd
+    if home and home != "/":
+        return
+    try:
+        import pwd
 
-            return Path(pwd.getpwuid(os.getuid()).pw_dir)
-        except Exception:
-            pass
-    return Path(os.path.expanduser("~"))
+        os.environ["HOME"] = pwd.getpwuid(os.getuid()).pw_dir
+    except Exception:
+        pass
 
 
 def data_dir() -> Path:
     """Return (creating if needed) the per-user app-data directory.
 
-    Qt-free so the CLI and browser session can use it without a running
-    ``QApplication``.
+    Uses platformdirs for the OS-correct location; Qt-free so the CLI and
+    browser session can use it without a running ``QApplication``.
     """
 
-    if sys.platform == "darwin":
-        base = _user_home() / "Library" / "Application Support"
-    elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA") or _user_home() / "AppData" / "Local")
-    else:
-        base = Path(
-            os.environ.get("XDG_DATA_HOME") or _user_home() / ".local" / "share"
-        )
-    path = base / APP_NAME
+    _ensure_home()
+    path = Path(platformdirs.user_data_dir(APP_NAME, appauthor=False))
     path.mkdir(parents=True, exist_ok=True)
     return path
 
