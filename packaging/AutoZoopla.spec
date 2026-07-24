@@ -42,6 +42,20 @@ a = Analysis(
     noarchive=False,
 )
 
+# PySide6 bundles its own OpenSSL (libssl/libcrypto) for Qt networking, which
+# this app never uses. Those libraries collide with cryptography's newer OpenSSL
+# (its _rust extension links against libssl at load time), producing a
+# "Symbol not found: _SSL_get0_group_name" crash on launch (seen on x86_64).
+# Drop the Qt-provided copies so cryptography's OpenSSL is the one that ships.
+a.binaries = [
+    _b
+    for _b in a.binaries
+    if not (
+        os.path.basename(_b[0]).startswith(("libssl.", "libcrypto."))
+        and "PySide6" in (_b[1] or "")
+    )
+]
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
