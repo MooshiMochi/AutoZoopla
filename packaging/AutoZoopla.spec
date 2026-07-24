@@ -24,6 +24,7 @@ _version = runpy.run_path(
 
 _pyside_datas, _pyside_binaries, _pyside_hidden = collect_all("PySide6")
 _playwright_hidden = collect_submodules("playwright")
+_nacl_datas, _nacl_binaries, _nacl_hidden = collect_all("nacl")
 
 with open(os.path.join(_here, "Info.plist"), "rb") as _plist_file:
     _info_plist = plistlib.load(_plist_file)
@@ -33,29 +34,19 @@ _info_plist["CFBundleVersion"] = _version
 a = Analysis(
     [os.path.join(_root, "src", "relister", "gui", "app.py")],
     pathex=[os.path.join(_root, "src")],
-    binaries=_pyside_binaries,
-    datas=_pyside_datas,
-    hiddenimports=_pyside_hidden + _playwright_hidden + ["relister", "image_manager"],
+    binaries=_pyside_binaries + _nacl_binaries,
+    datas=_pyside_datas + _nacl_datas,
+    hiddenimports=(
+        _pyside_hidden
+        + _playwright_hidden
+        + _nacl_hidden
+        + ["relister", "image_manager"]
+    ),
     hookspath=[],
     runtime_hooks=[],
     excludes=[],
     noarchive=False,
 )
-
-# Several packages (PySide6/Qt, Python's stdlib ssl) bundle their own
-# libssl/libcrypto. PyInstaller flattens them to one file per name, and an older
-# copy was winning over cryptography's newer OpenSSL, whose _rust extension needs
-# a 3.2+ symbol -> "Symbol not found: _SSL_get0_group_name" crash on launch.
-# Keep ONLY cryptography's OpenSSL (the newest); newer OpenSSL is a superset, so
-# Python's ssl resolves against it too.
-def _keep_binary(_b):
-    _base = os.path.basename(_b[0])
-    if _base.startswith(("libssl.", "libcrypto.")):
-        return "cryptography" in (_b[1] or "")
-    return True
-
-
-a.binaries = [_b for _b in a.binaries if _keep_binary(_b)]
 
 pyz = PYZ(a.pure)
 
