@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -35,6 +36,15 @@ from relister.gui.main_window import MainWindow  # noqa: E402
 
 
 def main() -> int:
+    # Also send logs to stderr so startup errors are visible from a terminal /
+    # crash log, not only in the in-app console. MainWindow additionally adds its
+    # Qt console handler. basicConfig is a no-op if handlers already exist.
+    logging.basicConfig(
+        level=logging.INFO,
+        stream=sys.stderr,
+        format="%(levelname)s %(name)s: %(message)s",
+    )
+
     app = QApplication(sys.argv)
     app.setApplicationName("AutoZoopla")
     app.setOrganizationName("AutoZoopla")

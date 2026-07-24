@@ -76,6 +76,20 @@ jobs:
             "https://github.com/${{ github.repository }}/releases/latest/download/appcast-${{ matrix.arch }}.xml" \
             dist/AutoZoopla.app/Contents/Info.plist
 
+      - name: Bundle Sparkle.framework
+        env:
+          SPARKLE_VERSION: "2.6.4"
+        run: |
+          # The updater loads Sparkle.framework from the app's Frameworks dir;
+          # it must be embedded (and signed as part of the bundle below).
+          curl -fsSL -o sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p sparkle-dist
+          tar -xf sparkle.tar.xz -C sparkle-dist
+          mkdir -p "dist/AutoZoopla.app/Contents/Frameworks"
+          cp -R sparkle-dist/Sparkle.framework \
+            "dist/AutoZoopla.app/Contents/Frameworks/"
+
       - name: Codesign app
         run: |
           # Sparkle's generate_appcast verifies the bundle's code signature. The
@@ -94,22 +108,35 @@ jobs:
 
       - name: Smoke-launch the built app
         run: |
-          # Launch the packaged binary headlessly and confirm it stays up. This
-          # catches import/bundling crashes (like the relative-import and missing
-          # LettingsListing failures) before anything is published.
+          # Launch the packaged binary headlessly, capture its console output,
+          # and fail if it crashes OR logs any error during the first seconds.
+          # This catches import/bundling crashes AND non-fatal startup errors
+          # (like the Sparkle framework load failure).
           export QT_QPA_PLATFORM=offscreen
-          "dist/AutoZoopla.app/Contents/MacOS/AutoZoopla" &
+          LOG=smoke.log
+          "dist/AutoZoopla.app/Contents/MacOS/AutoZoopla" >"$LOG" 2>&1 &
           PID=$!
-          sleep 20
-          if kill -0 "$PID" 2>/dev/null; then
-            echo "App launched and is still running -> OK."
-            kill "$PID" 2>/dev/null || true
-            wait "$PID" 2>/dev/null || true
-          else
-            wait "$PID"; CODE=$?
-            echo "App exited early (code $CODE) -> launch FAILED."
+          sleep 8
+          RUNNING=1
+          kill -0 "$PID" 2>/dev/null || RUNNING=0
+          kill "$PID" 2>/dev/null || true
+          wait "$PID" 2>/dev/null || true
+
+          echo "----- captured startup output -----"
+          cat "$LOG" || true
+          echo "-----------------------------------"
+
+          if [ "$RUNNING" -ne 1 ]; then
+            echo "App exited early -> launch FAILED."
             exit 1
           fi
+          # Anchor to our log format ("LEVEL name: msg") plus Python tracebacks,
+          # so we don't false-positive on Qt/native "error" chatter.
+          if grep -qE "Traceback \(most recent call last\)|^(ERROR|CRITICAL) " "$LOG"; then
+            echo "Error output detected during startup -> FAILED."
+            exit 1
+          fi
+          echo "App launched cleanly with no error output -> OK."
 
       - name: Build DMG and PKG (arch-tagged)
         run: |
