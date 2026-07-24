@@ -25,6 +25,7 @@ _version = runpy.run_path(
 _pyside_datas, _pyside_binaries, _pyside_hidden = collect_all("PySide6")
 _playwright_hidden = collect_submodules("playwright")
 _nacl_datas, _nacl_binaries, _nacl_hidden = collect_all("nacl")
+_cffi_datas, _cffi_binaries, _cffi_hidden = collect_all("cffi")
 
 with open(os.path.join(_here, "Info.plist"), "rb") as _plist_file:
     _info_plist = plistlib.load(_plist_file)
@@ -34,13 +35,14 @@ _info_plist["CFBundleVersion"] = _version
 a = Analysis(
     [os.path.join(_root, "src", "relister", "gui", "app.py")],
     pathex=[os.path.join(_root, "src")],
-    binaries=_pyside_binaries + _nacl_binaries,
-    datas=_pyside_datas + _nacl_datas,
+    binaries=_pyside_binaries + _nacl_binaries + _cffi_binaries,
+    datas=_pyside_datas + _nacl_datas + _cffi_datas,
     hiddenimports=(
         _pyside_hidden
         + _playwright_hidden
         + _nacl_hidden
-        + ["relister", "image_manager"]
+        + _cffi_hidden
+        + ["relister", "image_manager", "_cffi_backend"]
     ),
     hookspath=[],
     runtime_hooks=[],
