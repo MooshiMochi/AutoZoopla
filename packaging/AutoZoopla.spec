@@ -42,19 +42,20 @@ a = Analysis(
     noarchive=False,
 )
 
-# PySide6 bundles its own OpenSSL (libssl/libcrypto) for Qt networking, which
-# this app never uses. Those libraries collide with cryptography's newer OpenSSL
-# (its _rust extension links against libssl at load time), producing a
-# "Symbol not found: _SSL_get0_group_name" crash on launch (seen on x86_64).
-# Drop the Qt-provided copies so cryptography's OpenSSL is the one that ships.
-a.binaries = [
-    _b
-    for _b in a.binaries
-    if not (
-        os.path.basename(_b[0]).startswith(("libssl.", "libcrypto."))
-        and "PySide6" in (_b[1] or "")
-    )
-]
+# Several packages (PySide6/Qt, Python's stdlib ssl) bundle their own
+# libssl/libcrypto. PyInstaller flattens them to one file per name, and an older
+# copy was winning over cryptography's newer OpenSSL, whose _rust extension needs
+# a 3.2+ symbol -> "Symbol not found: _SSL_get0_group_name" crash on launch.
+# Keep ONLY cryptography's OpenSSL (the newest); newer OpenSSL is a superset, so
+# Python's ssl resolves against it too.
+def _keep_binary(_b):
+    _base = os.path.basename(_b[0])
+    if _base.startswith(("libssl.", "libcrypto.")):
+        return "cryptography" in (_b[1] or "")
+    return True
+
+
+a.binaries = [_b for _b in a.binaries if _keep_binary(_b)]
 
 pyz = PYZ(a.pure)
 
