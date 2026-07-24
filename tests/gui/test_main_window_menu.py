@@ -33,6 +33,19 @@ def test_has_check_for_updates_action(window):
     assert window.check_updates_action.text() == "Check for Updates…"
 
 
+def test_window_title_shows_version(window):
+    from relister.__version__ import __version__
+
+    assert __version__ in window.windowTitle()
+
+
+def test_sidebar_has_update_button_and_version(window):
+    from relister.__version__ import __version__
+
+    assert window.check_updates_button.text() == "Check for updates"
+    assert __version__ in window.version_label.text()
+
+
 def test_updater_reflects_platform(window):
     assert window._updater.available is (sys.platform == "darwin")
 

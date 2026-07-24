@@ -32,13 +32,30 @@ class SparkleUpdater:
             if controller_cls is None:
                 logger.warning("Sparkle.framework not found in the app bundle.")
                 return
+            # startingUpdater:YES starts Sparkle but does NOT force a check — it
+            # only wires up the scheduled checker. Sparkle intentionally skips
+            # the very first launch and then honours SUScheduledCheckInterval
+            # (24h), so a freshly installed app won't notice an update that is
+            # already waiting. Start it here, then explicitly kick a silent
+            # background check below so a pending update is offered right away.
             self._controller = (
                 controller_cls.alloc().initWithStartingUpdater_updaterDelegate_userDriverDelegate_(
-                    check_on_launch, None, None
+                    True, None, None
                 )
             )
+            if check_on_launch:
+                self._check_in_background()
         except Exception:  # pragma: no cover - macOS only
             logger.exception("Failed to initialise the Sparkle updater.")
+
+    def _check_in_background(self) -> None:  # pragma: no cover - macOS only
+        """Trigger Sparkle's silent check: prompts only if an update exists."""
+        if self._controller is None:
+            return
+        try:
+            self._controller.updater().checkForUpdatesInBackground()
+        except Exception:
+            logger.exception("Background update check failed to start.")
 
     def check_for_updates(self) -> None:
         if self._controller is not None:  # pragma: no cover - macOS only

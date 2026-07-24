@@ -26,6 +26,7 @@ from .prompt_bridge import PromptBridge
 from .services.settings_service import SettingsService
 from .theme import build_stylesheet
 from .updater import SparkleUpdater
+from ..__version__ import __version__
 from ..storage.app_settings import AppSettings
 from ..storage.credentials import CredentialStore
 from ..storage.property_images import PropertyImagesRepo
@@ -38,7 +39,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("AutoZoopla")
+        self.setWindowTitle(f"AutoZoopla v{__version__}")
         self.resize(1220, 820)
         self.setMinimumSize(1050, 770)
 
@@ -178,6 +179,19 @@ class MainWindow(QMainWindow):
         self.sidebar_hint.setObjectName("sidebarHint")
         self.sidebar_hint.setWordWrap(True)
         layout.addWidget(self.sidebar_hint)
+
+        # Updates ----------------------------------------------------------
+        layout.addSpacing(10)
+        self.check_updates_button = QPushButton("Check for updates")
+        self.check_updates_button.setObjectName("sidebarUpdateButton")
+        self.check_updates_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.check_updates_button.clicked.connect(self._check_for_updates)
+        layout.addWidget(self.check_updates_button)
+
+        self.version_label = QLabel(f"Version {__version__}")
+        self.version_label.setObjectName("sidebarVersion")
+        self.version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.version_label)
 
         return sidebar
 

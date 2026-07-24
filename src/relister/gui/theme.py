@@ -217,6 +217,13 @@ QLabel#sidebarHint {
     color: #94a3b8; background: #131e33; border: 1px solid #24324b;
     border-radius: 12px; padding: 13px; line-height: 1.5;
 }
+QPushButton#sidebarUpdateButton {
+    min-height: 34px; padding: 0 12px; color: #cbd5e1; background: #1e293b;
+    border: 1px solid #33415c; border-radius: 10px; font-weight: 600;
+}
+QPushButton#sidebarUpdateButton:hover { background: #273349; color: #ffffff; border-color: #4f46e5; }
+QPushButton#sidebarUpdateButton:pressed { background: #4f46e5; color: #ffffff; }
+QLabel#sidebarVersion { color: #64748b; font-size: 11px; padding: 6px 0 0 0; }
 
 /* Headings & badges -------------------------------------------------------- */
 QLabel#pageTitle, QLabel#titleLabel { color: #0f172a; font-size: 21px; font-weight: 700; }
