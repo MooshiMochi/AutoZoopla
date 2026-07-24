@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from relister.core.paths import credentials_path
+from relister.core.paths import credentials_path, ensure_writable
 from relister.core.security import get_cipher
 
 
@@ -28,6 +28,7 @@ class CredentialStore:
         return json.loads(raw.decode("utf-8"))
 
     def _save(self, data: dict) -> None:
+        ensure_writable()
         blob = get_cipher().encrypt(json.dumps(data).encode("utf-8"))
         self._path.write_bytes(blob)
 

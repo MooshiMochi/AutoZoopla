@@ -371,6 +371,9 @@ class RelistPage(BasePage):
     def set_status(self, text: str) -> None:
         self.status_label.setText(text)
 
+    def show_success_banner(self, message: str) -> None:
+        self.top_banner.show_banner("success", message)
+
     def set_images_dir(self, directory: str) -> None:
         self.images_edit.setText(directory)
         self._validate_images_directory()

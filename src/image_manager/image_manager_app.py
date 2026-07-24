@@ -1072,11 +1072,8 @@ class ImageOrderPage(QWidget):
         self.status_label.setText(
             f"Saved {len(visible_names)} visible filenames to {INSTRUCTIONS_FILENAME}."
         )
-        QMessageBox.information(
-            self,
-            "Image order saved",
-            f"Saved the visible image order to:\n{instructions_path}",
-        )
+        # No success popup: the embedding app shows a status banner instead, and
+        # the status label above is the confirmation when run standalone.
         self.instructions_saved.emit(str(self.current_directory))
 
     def shutdown(self) -> None:

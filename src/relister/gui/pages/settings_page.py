@@ -19,6 +19,7 @@ from ...storage.app_settings import AppSettings
 from ...storage.credentials import CredentialStore
 from ..theme import ModernCheckBox
 from ..widgets.form_helpers import field_label, section_row
+from ..widgets.top_banner import TopBanner
 from .base_page import BasePage
 
 
@@ -57,6 +58,8 @@ class SettingsPage(BasePage):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         page_layout.addWidget(scroll, 1)
+
+        self.top_banner = TopBanner(self)
 
         body = QWidget()
         body.setObjectName("settingsBody")
@@ -188,20 +191,30 @@ class SettingsPage(BasePage):
         for edit in self._password_edits:
             edit.setEchoMode(mode)
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self.top_banner.reposition()
+
     def _save(self) -> None:
-        self._credentials.set(
-            "zoopla",
-            "source",
-            self.source_username.text().strip(),
-            self.source_password.text(),
-        )
-        self._credentials.set(
-            "zoopla",
-            "destination",
-            self.destination_username.text().strip(),
-            self.destination_password.text(),
-        )
-        branch_id = self.branch_id_edit.text().strip()
-        if branch_id:
-            self._app_settings.set("zoopla_branch_id", branch_id)
+        try:
+            self._credentials.set(
+                "zoopla",
+                "source",
+                self.source_username.text().strip(),
+                self.source_password.text(),
+            )
+            self._credentials.set(
+                "zoopla",
+                "destination",
+                self.destination_username.text().strip(),
+                self.destination_password.text(),
+            )
+            branch_id = self.branch_id_edit.text().strip()
+            if branch_id:
+                self._app_settings.set("zoopla_branch_id", branch_id)
+        except Exception as exc:
+            self.status_label.setText("Could not save settings.")
+            self.top_banner.show_banner("error", f"Could not save settings: {exc}")
+            return
         self.status_label.setText("Settings saved.")
+        self.top_banner.show_banner("success", "Credentials and settings saved.")

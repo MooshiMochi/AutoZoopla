@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from relister.core.paths import data_dir
+from relister.core.paths import data_dir, ensure_writable
 
 
 class AppSettings:
@@ -30,6 +30,7 @@ class AppSettings:
         return value if value is not None else default
 
     def set(self, key: str, value: str) -> None:
+        ensure_writable()
         data = self._load()
         data[key] = value
         self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")

@@ -49,6 +49,23 @@ def test_reload_prefills_existing_values(qapp, tmp_path):
     assert page.branch_id_edit.text() == "777"
 
 
+def test_save_shows_success_banner(qapp, tmp_path):
+    page, _, _ = _page(tmp_path)
+    page.resize(800, 600)
+    page.show()
+    qapp.processEvents()
+    page.source_username.setText("u@e.com")
+    page.source_password.setText("pw")
+
+    page._save()
+    page.top_banner._anim.stop()
+    page.top_banner._finish_animation()
+
+    assert page.top_banner.isVisible()
+    assert page.top_banner.property("state") == "success"
+    page.close()
+
+
 def test_show_passwords_toggles_echo_mode(qapp, tmp_path):
     from PySide6.QtWidgets import QLineEdit
 

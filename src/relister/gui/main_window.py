@@ -255,6 +255,7 @@ class MainWindow(QMainWindow):
             self._organizer_return_to_relist = False
             self._switch_to_index(0)
             self.relist_page.url_edit.setFocus(Qt.FocusReason.OtherFocusReason)
+        self.relist_page.show_success_banner("Image order saved.")
 
     # ------------------------------------------------------------- lifecycle
 
