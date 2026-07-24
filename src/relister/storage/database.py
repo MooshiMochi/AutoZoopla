@@ -15,9 +15,9 @@ CREATE TABLE IF NOT EXISTS property_images (
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    conn = sqlite3.connect(path or database_path())
-    conn.execute("PRAGMA journal_mode=WAL")
-    return conn
+    # Default (rollback) journal mode: no -wal/-shm side files, most portable
+    # for a tiny single-user database.
+    return sqlite3.connect(path or database_path())
 
 
 def init_schema(conn: sqlite3.Connection) -> None:

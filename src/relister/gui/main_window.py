@@ -57,7 +57,17 @@ class MainWindow(QMainWindow):
         logging.getLogger().addHandler(self._log_handler)
 
         # Pages ------------------------------------------------------------
-        self._repo = PropertyImagesRepo()
+        from ..core import paths
+
+        logger.info("App data directory: %s", paths.data_dir())
+
+        # A read-only/inaccessible data dir must not prevent the app from
+        # opening; the image-folder memory feature just degrades to off.
+        try:
+            self._repo: PropertyImagesRepo | None = PropertyImagesRepo()
+        except Exception:
+            logger.exception("Could not open the property-images database.")
+            self._repo = None
         self._credentials = CredentialStore()
         self._app_settings = AppSettings()
         self.relist_page = RelistPage(

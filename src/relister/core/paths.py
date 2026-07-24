@@ -7,6 +7,28 @@ from pathlib import Path
 APP_NAME = "AutoZoopla"
 
 
+def _user_home() -> Path:
+    """The real home directory of the current user.
+
+    A GUI app launched from Finder/launchd can inherit a missing or ``/`` value
+    for ``$HOME``; that would place the app-data dir under the root-owned
+    system ``/Library`` and make the database read-only. Fall back to the passwd
+    database so we always resolve the actual user home.
+    """
+
+    home = os.environ.get("HOME")
+    if home and home not in ("", "/"):
+        return Path(home)
+    if os.name != "nt":
+        try:
+            import pwd
+
+            return Path(pwd.getpwuid(os.getuid()).pw_dir)
+        except Exception:
+            pass
+    return Path(os.path.expanduser("~"))
+
+
 def data_dir() -> Path:
     """Return (creating if needed) the per-user app-data directory.
 
@@ -15,11 +37,13 @@ def data_dir() -> Path:
     """
 
     if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Application Support"
+        base = _user_home() / "Library" / "Application Support"
     elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        base = Path(os.environ.get("LOCALAPPDATA") or _user_home() / "AppData" / "Local")
     else:
-        base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+        base = Path(
+            os.environ.get("XDG_DATA_HOME") or _user_home() / ".local" / "share"
+        )
     path = base / APP_NAME
     path.mkdir(parents=True, exist_ok=True)
     return path
