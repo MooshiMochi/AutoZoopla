@@ -73,3 +73,6 @@ class PropertyListing(BaseModel):
             f"        Source URL: {self.source_url}"
             "}}>"
         )
+
+
+class LettingsListing(BaseModel): ...

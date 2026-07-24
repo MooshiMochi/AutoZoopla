@@ -92,6 +92,25 @@ jobs:
           fi
           codesign --verify --verbose dist/AutoZoopla.app
 
+      - name: Smoke-launch the built app
+        run: |
+          # Launch the packaged binary headlessly and confirm it stays up. This
+          # catches import/bundling crashes (like the relative-import and missing
+          # LettingsListing failures) before anything is published.
+          export QT_QPA_PLATFORM=offscreen
+          "dist/AutoZoopla.app/Contents/MacOS/AutoZoopla" &
+          PID=$!
+          sleep 20
+          if kill -0 "$PID" 2>/dev/null; then
+            echo "App launched and is still running -> OK."
+            kill "$PID" 2>/dev/null || true
+            wait "$PID" 2>/dev/null || true
+          else
+            wait "$PID"; CODE=$?
+            echo "App exited early (code $CODE) -> launch FAILED."
+            exit 1
+          fi
+
       - name: Build DMG and PKG (arch-tagged)
         run: |
           V="${{ steps.version.outputs.version }}"
