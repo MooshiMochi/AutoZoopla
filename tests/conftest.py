@@ -30,7 +30,11 @@ class _MemoryKeyring(KeyringBackend):
 
 @pytest.fixture(autouse=True)
 def _memory_keyring():
+    from relister.core import security
+
     previous = keyring.get_keyring()
     keyring.set_keyring(_MemoryKeyring())
+    security._reset_key_cache()
     yield
+    security._reset_key_cache()
     keyring.set_keyring(previous)
