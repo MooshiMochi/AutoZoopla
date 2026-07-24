@@ -228,7 +228,12 @@ class RelistPage(BasePage):
         self.publish_checkbox.setToolTip(
             "When unticked, the workflow runs in dry-run mode."
         )
+        self.publish_checkbox.setChecked(True)
         self.headless_checkbox = ModernCheckBox("Run browser headlessly")
+        self.headless_checkbox.setToolTip(
+            "When ticked, the browser runs in the background without a visible window."
+        )
+        self.headless_checkbox.setChecked(True)
         self.verbose_checkbox = ModernCheckBox("Verbose logs")
         self.verbose_checkbox.setChecked(True)
         options_row.addWidget(self.publish_checkbox)
@@ -377,9 +382,7 @@ class RelistPage(BasePage):
     def set_images_dir(self, directory: str) -> None:
         self.images_edit.setText(directory)
         self._validate_images_directory()
-        self.status_label.setText(
-            "Image order saved. The relist is ready to continue."
-        )
+        self.status_label.setText("Image order saved. The relist is ready to continue.")
 
     def has_active_worker(self) -> bool:
         return self._worker is not None
@@ -717,8 +720,8 @@ class RelistPage(BasePage):
         app = QApplication.instance()
         if app is not None:
             if window is not None:
-                app.alert(window, 0)
-            app.beep()
+                app.alert(window, 0)  # type: ignore
+            app.beep()  # type: ignore
 
     def _submit_prompt(self, response: str) -> None:
         if not self._prompt_bridge.is_waiting:
