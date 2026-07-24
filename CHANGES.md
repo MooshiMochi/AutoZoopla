@@ -1,6 +1,6 @@
 # Combined desktop app changes
 
-## 0.1.1a — bug-fix pass
+## 0.1.2 — bug-fix pass
 
 - **Browser no longer leaks between runs.** Cancelling a relist now always tears the
   browser context and browser down (even if the cancellation lands mid-teardown), and
@@ -17,7 +17,7 @@
   redundant separators) on load so it no longer spuriously warns that the folder is
   missing.
 - **App icon.** Added an "AZ" monogram icon for the macOS bundle, Dock and window/taskbar.
-- Window title and sidebar now show the version (`v0.1.1a`).
+- Window title and sidebar now show the version (`v0.1.2`).
 
 ## Unified application
 
